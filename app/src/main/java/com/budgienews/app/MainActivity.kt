@@ -1,15 +1,23 @@
 package com.budgienews.app
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.text.Html
 import android.util.Xml
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -77,6 +85,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.xmlpull.v1.XmlPullParser
 import java.net.HttpURLConnection
+import java.net.URLDecoder
 import java.net.URL
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -92,15 +101,43 @@ private val AccentSoft = Color(0xFF203A36)
 private val Alert = Color(0xFFFFB86B)
 
 private val FeedSources = listOf(
-    FeedSource("BBC World", "https://feeds.bbci.co.uk/news/world/rss.xml"),
-    FeedSource("NPR News", "https://feeds.npr.org/1001/rss.xml"),
+    FeedSource("BBC UK", "https://feeds.bbci.co.uk/news/uk/rss.xml"),
+    FeedSource("Sky News UK", "https://feeds.skynews.com/feeds/rss/uk.xml"),
 )
 
 class MainActivity : ComponentActivity() {
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        BudgieNotifications.ensureChannels(this)
+        requestNotificationPermissionIfNeeded()
         setContent { BudgieNewsTheme { NewsApp() } }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+}
+
+private object BudgieNotifications {
+    const val BREAKING_CHANNEL_ID = "budgie_news_breaking"
+
+    fun ensureChannels(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channel = NotificationChannel(
+            BREAKING_CHANNEL_ID,
+            "Breaking news",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "Important Budgie News alerts"
+        }
+        manager.createNotificationChannel(channel)
     }
 }
 
@@ -118,6 +155,12 @@ private data class FeedSource(
     val url: String,
 )
 
+private enum class SourceFilter(val label: String, val sourceName: String?) {
+    ALL("All", null),
+    BBC("BBC", "BBC UK"),
+    SKY("Sky", "Sky News UK"),
+}
+
 private enum class NewsSection(
     val label: String,
     val tagline: String,
@@ -125,7 +168,7 @@ private enum class NewsSection(
 ) {
     HEADLINES(
         "Headlines",
-        "Curated from two test feeds",
+        "Curated GB headlines",
         "No headlines were found in the selected feeds.",
     ),
     BREAKING(
@@ -135,7 +178,7 @@ private enum class NewsSection(
     ),
     IMPORTANT(
         "Important",
-        "High-impact world and public-interest stories",
+        "High-impact UK public-interest stories",
         "No important stories matched the current filters.",
     ),
 }
@@ -151,19 +194,20 @@ private sealed interface FeedState {
 private fun NewsApp() {
     var refreshToken by remember { mutableStateOf(0) }
     var selectedSection by remember { mutableStateOf(NewsSection.HEADLINES) }
+    var selectedSource by remember { mutableStateOf(SourceFilter.ALL) }
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     val scope = rememberCoroutineScope()
 
     fun refresh() {
         state = FeedState.Loading
         scope.launch {
-            state = fetchFeeds(selectedSection)
+            state = fetchFeeds(selectedSection, selectedSource)
         }
     }
 
-    LaunchedEffect(refreshToken, selectedSection) {
+    LaunchedEffect(refreshToken, selectedSection, selectedSource) {
         state = FeedState.Loading
-        state = fetchFeeds(selectedSection)
+        state = fetchFeeds(selectedSection, selectedSource)
     }
 
     Scaffold(
@@ -177,7 +221,7 @@ private fun NewsApp() {
                         Spacer(Modifier.size(10.dp))
                         Column {
                             Text("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold)
-                            Text(selectedSection.tagline, color = Muted, fontSize = 12.sp)
+                            Text(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp)
                         }
                     }
                 },
@@ -196,7 +240,9 @@ private fun NewsApp() {
             is FeedState.Ready -> NewsList(
                 items = value.items,
                 selectedSection = selectedSection,
+                selectedSource = selectedSource,
                 onSectionSelected = { selectedSection = it },
+                onSourceSelected = { selectedSource = it },
                 modifier = Modifier.padding(padding),
             )
         }
@@ -239,7 +285,9 @@ private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier =
 private fun NewsList(
     items: List<FeedItem>,
     selectedSection: NewsSection,
+    selectedSource: SourceFilter,
     onSectionSelected: (NewsSection) -> Unit,
+    onSourceSelected: (SourceFilter) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -248,10 +296,15 @@ private fun NewsList(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            SectionMenu(selectedSection, onSectionSelected)
+            SectionMenu(
+                selectedSection = selectedSection,
+                selectedSource = selectedSource,
+                onSectionSelected = onSectionSelected,
+                onSourceSelected = onSourceSelected,
+            )
         }
         item {
-            FeedSourceNote()
+            FeedSourceNote(selectedSource)
         }
         if (items.isEmpty()) {
             item {
@@ -271,7 +324,9 @@ private fun NewsList(
 @Composable
 private fun SectionMenu(
     selectedSection: NewsSection,
+    selectedSource: SourceFilter,
     onSectionSelected: (NewsSection) -> Unit,
+    onSourceSelected: (SourceFilter) -> Unit,
 ) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -298,13 +353,34 @@ private fun SectionMenu(
                 border = BorderStroke(1.dp, if (selected) Accent else AccentSoft),
             )
         }
+        items(SourceFilter.entries.filter { it != SourceFilter.ALL }) { source ->
+            val selected = source == selectedSource
+            AssistChip(
+                onClick = { onSourceSelected(if (selected) SourceFilter.ALL else source) },
+                label = { Text(source.label) },
+                leadingIcon = {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.Article,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                },
+                shape = RoundedCornerShape(6.dp),
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (selected) Accent else SurfaceDark,
+                    labelColor = if (selected) Paper else Ink,
+                    leadingIconContentColor = if (selected) Paper else Muted,
+                ),
+                border = BorderStroke(1.dp, if (selected) Accent else AccentSoft),
+            )
+        }
     }
 }
 
 @Composable
-private fun FeedSourceNote() {
+private fun FeedSourceNote(selectedSource: SourceFilter) {
     Text(
-        "Using 2 curated feeds: BBC World and NPR News",
+        selectedSource.sourceNote(),
         color = Muted,
         fontSize = 12.sp,
         modifier = Modifier.padding(horizontal = 2.dp),
@@ -427,13 +503,16 @@ private fun BudgieMark() {
     }
 }
 
-private suspend fun fetchFeeds(section: NewsSection): FeedState = withContext(Dispatchers.IO) {
+private suspend fun fetchFeeds(section: NewsSection, sourceFilter: SourceFilter): FeedState = withContext(Dispatchers.IO) {
     runCatching {
         val loadedItems = FeedSources
+            .filter { sourceFilter.sourceName == null || it.name == sourceFilter.sourceName }
             .flatMap { source -> runCatching { fetchFeed(source).take(12) }.getOrDefault(emptyList()) }
             .distinctBy { it.link.ifBlank { it.title } }
         if (loadedItems.isEmpty()) {
-            val sourceNames = FeedSources.joinToString { it.name }
+            val sourceNames = FeedSources
+                .filter { sourceFilter.sourceName == null || it.name == sourceFilter.sourceName }
+                .joinToString { it.name }
             error("No stories loaded from $sourceNames")
         }
         loadedItems.filterFor(section).take(24)
@@ -498,7 +577,12 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String): FeedItem {
             "pubdate" -> pubDate = parser.readText().formatRssDate()
             "source" -> source = parser.readText().ifBlank { source }
             "enclosure" -> imageUrl = parser.attributeValue("url") ?: imageUrl
-            "thumbnail", "content" -> imageUrl = parser.attributeValue("url") ?: imageUrl
+            "thumbnail", "media:thumbnail", "media:content" -> imageUrl = parser.attributeValue("url") ?: imageUrl
+            "content:encoded" -> {
+                val encodedContent = parser.readText()
+                imageUrl = encodedContent.firstImageUrl() ?: imageUrl
+                if (description.isBlank()) description = encodedContent.stripHtml()
+            }
             else -> parser.skipTag()
         }
     }
@@ -550,6 +634,17 @@ private fun FeedItem.matchesAny(vararg keywords: String): Boolean {
     return keywords.any { keyword -> haystack.contains(keyword) }
 }
 
+private fun SourceFilter.tagline(section: NewsSection): String = when (this) {
+    SourceFilter.ALL -> section.tagline
+    else -> "${label} ${section.label.lowercase()}"
+}
+
+private fun SourceFilter.sourceNote(): String = when (this) {
+    SourceFilter.ALL -> "Using 2 curated GB feeds: BBC UK and Sky News UK"
+    SourceFilter.BBC -> "Showing BBC UK stories only"
+    SourceFilter.SKY -> "Showing Sky News UK stories only"
+}
+
 private fun XmlPullParser.readText(): String {
     if (next() != XmlPullParser.TEXT) return ""
     val result = text.orEmpty()
@@ -577,6 +672,17 @@ private fun XmlPullParser.attributeValue(name: String): String? {
 
 private fun String.stripHtml(): String =
     Html.fromHtml(this, Html.FROM_HTML_MODE_LEGACY).toString().trim()
+
+private fun String.firstImageUrl(): String? {
+    val match = Regex("""<img[^>]+src=['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(this)
+    val rawUrl = match?.groupValues?.getOrNull(1)?.replace("&amp;", "&") ?: return null
+    return rawUrl.extractNestedImageUrl()
+}
+
+private fun String.extractNestedImageUrl(): String {
+    val nestedUrl = Uri.parse(this).getQueryParameter("url")
+    return if (nestedUrl.isNullOrBlank()) this else URLDecoder.decode(nestedUrl, Charsets.UTF_8.name())
+}
 
 private fun String.formatRssDate(): String = try {
     DateTimeFormatter.ofPattern("MMM d, h:mm a").format(ZonedDateTime.parse(this, DateTimeFormatter.RFC_1123_DATE_TIME))
@@ -626,22 +732,24 @@ private fun NewsPreview() {
                 FeedItem(
                     title = "Markets and politics drive a busy morning briefing",
                     description = "A compact summary of the biggest stories available from the test RSS feed.",
-                    link = "https://www.bbc.co.uk/news/world",
-                    source = "BBC World",
+                    link = "https://www.bbc.co.uk/news/uk",
+                    source = "BBC UK",
                     publishedAt = "Jun 23, 7:10 PM",
                     imageUrl = null,
                 ),
                 FeedItem(
-                    title = "World leaders meet as new policy announcements continue",
+                    title = "UK leaders respond as major policy announcements continue",
                     description = "Latest updates are displayed in a scrollable modern news feed.",
-                    link = "https://www.npr.org/",
-                    source = "NPR News",
+                    link = "https://news.sky.com/uk",
+                    source = "Sky News UK",
                     publishedAt = "Jun 23, 6:42 PM",
                     imageUrl = null,
                 ),
             ),
             selectedSection = NewsSection.HEADLINES,
+            selectedSource = SourceFilter.ALL,
             onSectionSelected = {},
+            onSourceSelected = {},
             modifier = Modifier.background(Paper),
         )
     }

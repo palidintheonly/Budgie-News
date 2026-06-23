@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -11,8 +12,8 @@ android {
         applicationId = "com.budgienews.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.0.2-alpha"
+        versionCode = 3
+        versionName = "0.0.3-alpha"
     }
 
     buildFeatures {
@@ -27,6 +28,8 @@ android {
 }
 
 dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
+    implementation("com.google.firebase:firebase-analytics")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation("androidx.core:core-ktx:1.17.0")
