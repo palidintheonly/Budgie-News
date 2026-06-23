@@ -34,7 +34,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
-import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AssistChip
@@ -93,8 +92,8 @@ private val AccentSoft = Color(0xFF203A36)
 private val Alert = Color(0xFFFFB86B)
 
 private val FeedSources = listOf(
-    FeedSource("Yahoo Headlines", "https://www.yahoo.com/news/rss"),
     FeedSource("BBC World", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+    FeedSource("NPR News", "https://feeds.npr.org/1001/rss.xml"),
 )
 
 class MainActivity : ComponentActivity() {
@@ -305,7 +304,7 @@ private fun SectionMenu(
 @Composable
 private fun FeedSourceNote() {
     Text(
-        "Using 2 curated feeds: Yahoo Headlines and BBC World",
+        "Using 2 curated feeds: BBC World and NPR News",
         color = Muted,
         fontSize = 12.sp,
         modifier = Modifier.padding(horizontal = 2.dp),
@@ -430,11 +429,14 @@ private fun BudgieMark() {
 
 private suspend fun fetchFeeds(section: NewsSection): FeedState = withContext(Dispatchers.IO) {
     runCatching {
-        FeedSources
-            .flatMap { source -> fetchFeed(source).take(12) }
+        val loadedItems = FeedSources
+            .flatMap { source -> runCatching { fetchFeed(source).take(12) }.getOrDefault(emptyList()) }
             .distinctBy { it.link.ifBlank { it.title } }
-            .filterFor(section)
-            .take(24)
+        if (loadedItems.isEmpty()) {
+            val sourceNames = FeedSources.joinToString { it.name }
+            error("No stories loaded from $sourceNames")
+        }
+        loadedItems.filterFor(section).take(24)
     }.fold(
         onSuccess = { items ->
             FeedState.Ready(items)
@@ -624,16 +626,16 @@ private fun NewsPreview() {
                 FeedItem(
                     title = "Markets and politics drive a busy morning briefing",
                     description = "A compact summary of the biggest stories available from the test RSS feed.",
-                    link = "https://www.yahoo.com/news/",
-                    source = "Yahoo News",
+                    link = "https://www.bbc.co.uk/news/world",
+                    source = "BBC World",
                     publishedAt = "Jun 23, 7:10 PM",
                     imageUrl = null,
                 ),
                 FeedItem(
                     title = "World leaders meet as new policy announcements continue",
                     description = "Latest updates are displayed in a scrollable modern news feed.",
-                    link = "https://www.yahoo.com/news/",
-                    source = "Yahoo News",
+                    link = "https://www.npr.org/",
+                    source = "NPR News",
                     publishedAt = "Jun 23, 6:42 PM",
                     imageUrl = null,
                 ),
