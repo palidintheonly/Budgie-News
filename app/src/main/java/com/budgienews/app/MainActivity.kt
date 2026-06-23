@@ -28,12 +28,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Article
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Article
-import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -87,7 +92,10 @@ private val Accent = Color(0xFF37C6A3)
 private val AccentSoft = Color(0xFF203A36)
 private val Alert = Color(0xFFFFB86B)
 
-private const val DefaultFeedUrl = "https://www.yahoo.com/news/rss"
+private val FeedSources = listOf(
+    FeedSource("Yahoo Headlines", "https://www.yahoo.com/news/rss"),
+    FeedSource("BBC World", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -106,6 +114,33 @@ private data class FeedItem(
     val imageUrl: String?,
 )
 
+private data class FeedSource(
+    val name: String,
+    val url: String,
+)
+
+private enum class NewsSection(
+    val label: String,
+    val tagline: String,
+    val emptyText: String,
+) {
+    HEADLINES(
+        "Headlines",
+        "Curated from two test feeds",
+        "No headlines were found in the selected feeds.",
+    ),
+    BREAKING(
+        "Breaking",
+        "Live, urgent, and developing stories",
+        "No breaking stories matched the current filters.",
+    ),
+    IMPORTANT(
+        "Important",
+        "High-impact world and public-interest stories",
+        "No important stories matched the current filters.",
+    ),
+}
+
 private sealed interface FeedState {
     data object Loading : FeedState
     data class Ready(val items: List<FeedItem>) : FeedState
@@ -116,19 +151,20 @@ private sealed interface FeedState {
 @Composable
 private fun NewsApp() {
     var refreshToken by remember { mutableStateOf(0) }
+    var selectedSection by remember { mutableStateOf(NewsSection.HEADLINES) }
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     val scope = rememberCoroutineScope()
 
     fun refresh() {
         state = FeedState.Loading
         scope.launch {
-            state = fetchFeed(DefaultFeedUrl)
+            state = fetchFeeds(selectedSection)
         }
     }
 
-    LaunchedEffect(refreshToken) {
+    LaunchedEffect(refreshToken, selectedSection) {
         state = FeedState.Loading
-        state = fetchFeed(DefaultFeedUrl)
+        state = fetchFeeds(selectedSection)
     }
 
     Scaffold(
@@ -142,7 +178,7 @@ private fun NewsApp() {
                         Spacer(Modifier.size(10.dp))
                         Column {
                             Text("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold)
-                            Text("Testing with Yahoo News RSS", color = Muted, fontSize = 12.sp)
+                            Text(selectedSection.tagline, color = Muted, fontSize = 12.sp)
                         }
                     }
                 },
@@ -158,7 +194,12 @@ private fun NewsApp() {
         when (val value = state) {
             FeedState.Loading -> LoadingNews(Modifier.padding(padding))
             is FeedState.Error -> ErrorNews(value.message, ::refresh, Modifier.padding(padding))
-            is FeedState.Ready -> NewsList(value.items, Modifier.padding(padding))
+            is FeedState.Ready -> NewsList(
+                items = value.items,
+                selectedSection = selectedSection,
+                onSectionSelected = { selectedSection = it },
+                modifier = Modifier.padding(padding),
+            )
         }
     }
 }
@@ -178,7 +219,7 @@ private fun LoadingNews(modifier: Modifier = Modifier) {
 private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Rounded.Article, contentDescription = null, tint = Alert, modifier = Modifier.size(42.dp))
+            Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Alert, modifier = Modifier.size(42.dp))
             Spacer(Modifier.height(14.dp))
             Text("Could not load the feed", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
@@ -196,23 +237,100 @@ private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier =
 }
 
 @Composable
-private fun NewsList(items: List<FeedItem>, modifier: Modifier = Modifier) {
+private fun NewsList(
+    items: List<FeedItem>,
+    selectedSection: NewsSection,
+    onSectionSelected: (NewsSection) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            LeadStory(items.firstOrNull())
+            SectionMenu(selectedSection, onSectionSelected)
         }
-        items(items.drop(1)) { item ->
-            StoryCard(item)
+        item {
+            FeedSourceNote()
+        }
+        if (items.isEmpty()) {
+            item {
+                EmptySection(selectedSection)
+            }
+        } else {
+            item {
+                LeadStory(items.firstOrNull(), selectedSection)
+            }
+            items(items.drop(1)) { item ->
+                StoryCard(item)
+            }
         }
     }
 }
 
 @Composable
-private fun LeadStory(item: FeedItem?) {
+private fun SectionMenu(
+    selectedSection: NewsSection,
+    onSectionSelected: (NewsSection) -> Unit,
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 2.dp),
+    ) {
+        items(NewsSection.entries) { section ->
+            val selected = section == selectedSection
+            AssistChip(
+                onClick = { onSectionSelected(section) },
+                label = { Text(section.label) },
+                leadingIcon = {
+                    Icon(
+                        if (section == NewsSection.IMPORTANT) Icons.Rounded.PriorityHigh else Icons.AutoMirrored.Rounded.Article,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                },
+                shape = RoundedCornerShape(6.dp),
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (selected) Accent else SurfaceDark,
+                    labelColor = if (selected) Paper else Ink,
+                    leadingIconContentColor = if (selected) Paper else Muted,
+                ),
+                border = BorderStroke(1.dp, if (selected) Accent else AccentSoft),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FeedSourceNote() {
+    Text(
+        "Using 2 curated feeds: Yahoo Headlines and BBC World",
+        color = Muted,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(horizontal = 2.dp),
+    )
+}
+
+@Composable
+private fun EmptySection(section: NewsSection) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        border = BorderStroke(1.dp, AccentSoft),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(28.dp))
+            Text(section.emptyText, color = Ink, fontWeight = FontWeight.SemiBold)
+            Text("Try refresh, or switch to another menu section.", color = Muted, lineHeight = 20.sp)
+        }
+    }
+}
+
+@Composable
+private fun LeadStory(item: FeedItem?, section: NewsSection) {
     if (item == null) return
     val context = LocalContext.current
     Card(
@@ -227,7 +345,7 @@ private fun LeadStory(item: FeedItem?) {
         Column {
             RemoteImage(item.imageUrl, Modifier.fillMaxWidth().height(190.dp))
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Top story", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(section.label, color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text(item.title, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp)
                 if (item.description.isNotBlank()) {
                     Text(item.description, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
@@ -259,7 +377,7 @@ private fun StoryCard(item: FeedItem) {
                 }
                 StoryMeta(item)
             }
-            Icon(Icons.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
+            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -289,7 +407,7 @@ private fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
                 contentScale = ContentScale.Crop,
             )
         } else {
-            Icon(Icons.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(30.dp))
+            Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(30.dp))
         }
     }
 }
@@ -310,53 +428,60 @@ private fun BudgieMark() {
     }
 }
 
-private suspend fun fetchFeed(feedUrl: String): FeedState = withContext(Dispatchers.IO) {
+private suspend fun fetchFeeds(section: NewsSection): FeedState = withContext(Dispatchers.IO) {
     runCatching {
-        val connection = (URL(feedUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            setRequestProperty("User-Agent", "Budgie News Android")
-        }
-        try {
-            if (connection.responseCode !in 200..299) {
-                error("Feed returned HTTP ${connection.responseCode}")
-            }
-            connection.inputStream.use { stream ->
-                val parser = Xml.newPullParser().apply {
-                    setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-                    setInput(stream, null)
-                }
-                parseRss(parser)
-            }
-        } finally {
-            connection.disconnect()
-        }
+        FeedSources
+            .flatMap { source -> fetchFeed(source).take(12) }
+            .distinctBy { it.link.ifBlank { it.title } }
+            .filterFor(section)
+            .take(24)
     }.fold(
         onSuccess = { items ->
-            if (items.isEmpty()) FeedState.Error("The feed loaded, but no stories were found.")
-            else FeedState.Ready(items)
+            FeedState.Ready(items)
         },
-        onFailure = { FeedState.Error(it.message ?: "Unexpected network error") },
+        onFailure = { FeedState.Error(it.message ?: "Unexpected feed error") },
     )
 }
 
-private fun parseRss(parser: XmlPullParser): List<FeedItem> {
+private fun fetchFeed(source: FeedSource): List<FeedItem> {
+    val connection = (URL(source.url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 10_000
+        readTimeout = 15_000
+        setRequestProperty("User-Agent", "Budgie News Android")
+    }
+    try {
+        if (connection.responseCode !in 200..299) {
+            error("${source.name} returned HTTP ${connection.responseCode}")
+        }
+        return connection.inputStream.use { stream ->
+            val parser = Xml.newPullParser().apply {
+                setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+                setInput(stream, null)
+            }
+            parseRss(parser, source.name)
+        }
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun parseRss(parser: XmlPullParser, fallbackSource: String): List<FeedItem> {
     val items = mutableListOf<FeedItem>()
     var event = parser.eventType
     while (event != XmlPullParser.END_DOCUMENT) {
         if (event == XmlPullParser.START_TAG && parser.name.equals("item", ignoreCase = true)) {
-            items += readItem(parser)
+            items += readItem(parser, fallbackSource)
         }
         event = parser.next()
     }
     return items.take(40)
 }
 
-private fun readItem(parser: XmlPullParser): FeedItem {
+private fun readItem(parser: XmlPullParser, fallbackSource: String): FeedItem {
     var title = ""
     var description = ""
     var link = ""
-    var source = "Yahoo News"
+    var source = fallbackSource
     var pubDate = ""
     var imageUrl: String? = null
 
@@ -384,6 +509,43 @@ private fun readItem(parser: XmlPullParser): FeedItem {
         publishedAt = pubDate,
         imageUrl = imageUrl,
     )
+}
+
+private fun List<FeedItem>.filterFor(section: NewsSection): List<FeedItem> = when (section) {
+    NewsSection.HEADLINES -> this
+    NewsSection.BREAKING -> filter { item ->
+        item.matchesAny(
+            "breaking",
+            "live",
+            "urgent",
+            "developing",
+            "latest",
+            "alert",
+            "updates",
+        )
+    }
+    NewsSection.IMPORTANT -> filter { item ->
+        item.matchesAny(
+            "world",
+            "government",
+            "election",
+            "parliament",
+            "president",
+            "minister",
+            "court",
+            "war",
+            "conflict",
+            "climate",
+            "health",
+            "economy",
+            "security",
+        )
+    }
+}
+
+private fun FeedItem.matchesAny(vararg keywords: String): Boolean {
+    val haystack = "$title $description $source".lowercase()
+    return keywords.any { keyword -> haystack.contains(keyword) }
 }
 
 private fun XmlPullParser.readText(): String {
@@ -476,7 +638,9 @@ private fun NewsPreview() {
                     imageUrl = null,
                 ),
             ),
-            Modifier.background(Paper),
+            selectedSection = NewsSection.HEADLINES,
+            onSectionSelected = {},
+            modifier = Modifier.background(Paper),
         )
     }
 }

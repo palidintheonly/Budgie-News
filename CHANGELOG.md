@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.2-alpha
+
+- Added the foundation for the main menu screen with `Headlines`, `Breaking`, and `Important` sections.
+- Limited the app to 2 curated test feeds instead of a broad all-news feed.
+- Added Yahoo Headlines and BBC World as the initial feed sources.
+- Added section-specific filtering for breaking and important stories.
+- Added a feed source note so the current curated source setup is visible during testing.
+- Set `versionCode` to `2`.
+- Set `versionName` to `0.0.2-alpha`.
+
 ## 0.0.1-alpha
 
 - Created the initial Budgie News Android app.
