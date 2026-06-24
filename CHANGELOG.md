@@ -1,8 +1,11 @@
 # Changelog
 
-## 0.0.7-alpha
+## 0.0.8-alpha
 
-- Fixed vertically stacked text in the coverage panel and story cards.
-- Shortened long outlet labels so source buttons and pills stay readable.
-- Moved coverage outlet pills into a horizontal scroll row.
-- Added typewriter animation to main text areas across the app.-
+- Reworked settings into a BBC-style full-width settings screen.
+- Fully set up DB-backed account/settings sync through the Budgie News backend service.
+- Added GB/UK-only location preference for local news foundations.
+- Added notification, biometric, statistics, feedback, and library settings rows.
+- Added a bottom version block showing the app version name and version code.
+- Added SQL schema for future account/settings sync tables.
+- Added automatic backend database healing for missing account/settings tables, columns, indexes, and foreign keys.

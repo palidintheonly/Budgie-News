@@ -74,7 +74,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -142,6 +144,23 @@ private val FeedSources = listOf(
     FeedSource("The Sun News", "https://www.thesun.co.uk/news/feed/"),
     FeedSource("Financial Times UK", "https://www.ft.com/uk?format=rss"),
 )
+
+private val UkLocationOptions = listOf(
+    "United Kingdom",
+    "England",
+    "Scotland",
+    "Wales",
+    "Northern Ireland",
+    "London",
+    "North West",
+    "North East",
+    "Yorkshire",
+    "Midlands",
+    "South East",
+    "South West",
+)
+
+private const val AccountApiBaseUrl = "http://213.165.91.6:8080"
 
 class MainActivity : ComponentActivity() {
     private var isUnlocked by mutableStateOf(false)
@@ -271,7 +290,7 @@ class MainActivity : ComponentActivity() {
 private object BudgieFirebase {
     fun setup() {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.7-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.8-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         Firebase.remoteConfig.setConfigSettingsAsync(
             remoteConfigSettings {
@@ -360,6 +379,11 @@ private object BudgiePrefs {
     private const val KEY_IMPORTANT = "important_notifications"
     private const val KEY_SECTION = "default_section"
     private const val KEY_SOURCE = "default_source"
+    private const val KEY_ACCOUNT_ENABLED = "account_enabled"
+    private const val KEY_ACCOUNT_NAME = "account_name"
+    private const val KEY_ACCOUNT_EMAIL = "account_email"
+    private const val KEY_LOCATION = "uk_location"
+    private const val KEY_SEND_STATS = "send_stats"
     private const val KEY_LAST_BREAKING = "last_breaking_link"
     private const val KEY_LAST_IMPORTANT = "last_important_link"
 
@@ -371,6 +395,11 @@ private object BudgiePrefs {
             importantNotificationsEnabled = prefs.getBoolean(KEY_IMPORTANT, true),
             defaultSection = prefs.getString(KEY_SECTION, null)?.let { runCatching { NewsSection.valueOf(it) }.getOrNull() } ?: NewsSection.HEADLINES,
             defaultSource = prefs.getString(KEY_SOURCE, null)?.let { runCatching { SourceFilter.valueOf(it) }.getOrNull() } ?: SourceFilter.ALL,
+            accountEnabled = prefs.getBoolean(KEY_ACCOUNT_ENABLED, false),
+            accountName = prefs.getString(KEY_ACCOUNT_NAME, "").orEmpty(),
+            accountEmail = prefs.getString(KEY_ACCOUNT_EMAIL, "").orEmpty(),
+            ukLocation = prefs.getString(KEY_LOCATION, "United Kingdom").orEmpty(),
+            sendAppStatistics = prefs.getBoolean(KEY_SEND_STATS, true),
         )
     }
 
@@ -382,7 +411,24 @@ private object BudgiePrefs {
             .putBoolean(KEY_IMPORTANT, settings.importantNotificationsEnabled)
             .putString(KEY_SECTION, settings.defaultSection.name)
             .putString(KEY_SOURCE, settings.defaultSource.name)
+            .putBoolean(KEY_ACCOUNT_ENABLED, settings.accountEnabled)
+            .putString(KEY_ACCOUNT_NAME, settings.accountName)
+            .putString(KEY_ACCOUNT_EMAIL, settings.accountEmail)
+            .putString(KEY_LOCATION, settings.ukLocation)
+            .putBoolean(KEY_SEND_STATS, settings.sendAppStatistics)
             .apply()
+    }
+
+    suspend fun saveAndSync(context: Context, settings: AppSettings) {
+        save(context, settings)
+        if (!settings.accountEnabled || settings.accountEmail.isBlank()) return
+        withContext(Dispatchers.IO) {
+            runCatching {
+                BudgieAccountApi.sync(settings)
+            }.onFailure { error ->
+                FirebaseCrashlytics.getInstance().recordException(error)
+            }
+        }
     }
 
     fun shouldNotify(context: Context, section: NewsSection, item: FeedItem, settings: AppSettings): Boolean {
@@ -397,6 +443,42 @@ private object BudgiePrefs {
         if (prefs.getString(key, "") == item.link) return false
         prefs.edit().putString(key, item.link).apply()
         return true
+    }
+}
+
+private object BudgieAccountApi {
+    fun sync(settings: AppSettings) {
+        val body = JSONObject()
+            .put("email", settings.accountEmail)
+            .put("displayName", settings.accountName.ifBlank { "Budgie reader" })
+            .put("ukLocation", settings.ukLocation)
+            .put("defaultSection", settings.defaultSection.name)
+            .put("defaultSource", settings.defaultSource.name)
+            .put("biometricEnabled", settings.biometricEnabled)
+            .put("breakingNotificationsEnabled", settings.breakingNotificationsEnabled)
+            .put("importantNotificationsEnabled", settings.importantNotificationsEnabled)
+            .put("sendAppStatistics", settings.sendAppStatistics)
+            .toString()
+
+        val connection = (URL("$AccountApiBaseUrl/v1/account/sync").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10_000
+            readTimeout = 15_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "Budgie News Android")
+        }
+        try {
+            connection.outputStream.use { stream ->
+                stream.write(body.toByteArray(Charsets.UTF_8))
+            }
+            if (connection.responseCode !in 200..299) {
+                error("Account sync returned HTTP ${connection.responseCode}")
+            }
+        } finally {
+            connection.disconnect()
+        }
     }
 }
 
@@ -466,6 +548,11 @@ private data class AppSettings(
     val importantNotificationsEnabled: Boolean = true,
     val defaultSection: NewsSection = NewsSection.HEADLINES,
     val defaultSource: SourceFilter = SourceFilter.ALL,
+    val accountEnabled: Boolean = false,
+    val accountName: String = "",
+    val accountEmail: String = "",
+    val ukLocation: String = "United Kingdom",
+    val sendAppStatistics: Boolean = true,
 )
 
 private enum class SourceFilter(val label: String, val sourceName: String?) {
@@ -529,7 +616,9 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
 
     fun saveSettings(updated: AppSettings) {
         settings = updated
-        BudgiePrefs.save(context, updated)
+        scope.launch {
+            BudgiePrefs.saveAndSync(context, updated)
+        }
         onBiometricSettingChanged(updated.biometricEnabled)
     }
 
@@ -618,20 +707,81 @@ private fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF121016)),
+        contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         item {
-            SettingsToggle(
-                title = "Biometric login",
-                description = "Require device authentication when opening Budgie News.",
-                checked = settings.biometricEnabled,
-                onCheckedChange = { onSettingsChanged(settings.copy(biometricEnabled = it)) },
+            SettingsRow(
+                title = "Account",
+                description = if (settings.accountEnabled) {
+                    settings.accountEmail.ifBlank { "Optional Budgie account enabled" }
+                } else {
+                    "Optional account for syncing settings later"
+                },
             )
         }
         item {
-            SettingsToggle(
+            SettingsSwitchRow(
+                title = "Use optional account",
+                description = "Account setup is optional and prepared for DB-backed sync.",
+                checked = settings.accountEnabled,
+                onCheckedChange = { onSettingsChanged(settings.copy(accountEnabled = it)) },
+            )
+        }
+        if (settings.accountEnabled) {
+            item {
+                SettingsTextField(
+                    title = "Display name",
+                    value = settings.accountName,
+                    placeholder = "Budgie reader",
+                    onValueChange = { onSettingsChanged(settings.copy(accountName = it)) },
+                )
+            }
+            item {
+                SettingsTextField(
+                    title = "Email",
+                    value = settings.accountEmail,
+                    placeholder = "name@example.com",
+                    onValueChange = { onSettingsChanged(settings.copy(accountEmail = it)) },
+                )
+            }
+        }
+        item {
+            SettingsChoiceRow(
+                title = "Location",
+                description = "GB/UK only location-based news preference",
+                value = settings.ukLocation,
+                options = UkLocationOptions.map { location ->
+                    location to { onSettingsChanged(settings.copy(ukLocation = location)) }
+                },
+            )
+        }
+        item {
+            SettingsChoiceRow(
+                title = "Default outlet",
+                description = "Choose the outlet shown first when Budgie News opens",
+                value = settings.defaultSource.label,
+                options = SourceFilter.entries.map { it.label to { onSettingsChanged(settings.copy(defaultSource = it)) } },
+            )
+        }
+        item {
+            SettingsChoiceRow(
+                title = "Default section",
+                description = "Choose the news section shown first",
+                value = settings.defaultSection.label,
+                options = NewsSection.entries.map { it.label to { onSettingsChanged(settings.copy(defaultSection = it)) } },
+            )
+        }
+        item {
+            SettingsRow(
+                title = "Notification settings",
+                description = "Choose which Budgie News notifications you want to receive",
+            )
+        }
+        item {
+            SettingsSwitchRow(
                 title = "Breaking alerts",
                 description = "Notify only when the Breaking feed finds a new story.",
                 checked = settings.breakingNotificationsEnabled,
@@ -639,7 +789,7 @@ private fun SettingsScreen(
             )
         }
         item {
-            SettingsToggle(
+            SettingsSwitchRow(
                 title = "Important alerts",
                 description = "Notify only when the Important feed finds a new story.",
                 checked = settings.importantNotificationsEnabled,
@@ -647,80 +797,162 @@ private fun SettingsScreen(
             )
         }
         item {
-            SettingsPicker(
-                title = "Default section",
-                value = settings.defaultSection.label,
-                options = NewsSection.entries.map { it.label to { onSettingsChanged(settings.copy(defaultSection = it)) } },
+            SettingsSwitchRow(
+                title = "Biometric login",
+                description = "Require device authentication when opening Budgie News.",
+                checked = settings.biometricEnabled,
+                onCheckedChange = { onSettingsChanged(settings.copy(biometricEnabled = it)) },
             )
         }
         item {
-            SettingsPicker(
-                title = "Default outlet",
-                value = settings.defaultSource.label,
-                options = SourceFilter.entries.map { it.label to { onSettingsChanged(settings.copy(defaultSource = it)) } },
+            SettingsSwitchRow(
+                title = "Send app statistics",
+                description = "Budgie News uses this to analyse crashes, feed failures, and app quality.",
+                checked = settings.sendAppStatistics,
+                onCheckedChange = { onSettingsChanged(settings.copy(sendAppStatistics = it)) },
             )
+        }
+        item {
+            SettingsRow(
+                title = "Send technical feedback",
+                description = "Prepared for future account-backed feedback sync.",
+            )
+        }
+        item {
+            SettingsRow(
+                title = "Third party libraries",
+                description = "Firebase, Coil, AndroidX, Kotlin, and Jetpack Compose.",
+            )
+        }
+        item {
+            VersionFooter()
         }
     }
 }
 
 @Composable
-private fun SettingsToggle(
+private fun SettingsRow(
+    title: String,
+    description: String,
+) {
+    Column {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            TypewriterText(description, color = Muted, fontSize = 18.sp, lineHeight = 25.sp, maxLines = 3)
+        }
+        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
     title: String,
     description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        border = BorderStroke(1.dp, AccentSoft),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
+    Column {
         Row(
-            Modifier.padding(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Notifications, contentDescription = null, tint = Accent, modifier = Modifier.size(22.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                TypewriterText(title, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                TypewriterText(description, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 3)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                TypewriterText(description, color = Muted, fontSize = 18.sp, lineHeight = 25.sp, maxLines = 4)
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
+        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
     }
 }
 
 @Composable
-private fun SettingsPicker(
+private fun SettingsChoiceRow(
     title: String,
+    description: String,
     value: String,
     options: List<Pair<String, () -> Unit>>,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        border = BorderStroke(1.dp, AccentSoft),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            TypewriterText("$title: $value", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    Column {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            TypewriterText(description, color = Muted, fontSize = 18.sp, lineHeight = 25.sp, maxLines = 3)
+            TypewriterText(value, color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(options) { option ->
+                    val selected = option.first == value
                     AssistChip(
                         onClick = option.second,
-                        label = { Text(option.first) },
+                        label = { Text(option.first, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         shape = RoundedCornerShape(6.dp),
                         colors = AssistChipDefaults.assistChipColors(
-                            containerColor = if (option.first == value) Accent else SurfaceRaised,
-                            labelColor = if (option.first == value) Paper else Ink,
+                            containerColor = if (selected) Accent else SurfaceRaised,
+                            labelColor = if (selected) Paper else Ink,
                         ),
-                        border = BorderStroke(1.dp, if (option.first == value) Accent else AccentSoft),
+                        border = BorderStroke(1.dp, if (selected) Accent else AccentSoft),
                     )
                 }
             }
+        }
+        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+    }
+}
+
+@Composable
+private fun SettingsTextField(
+    title: String,
+    value: String,
+    placeholder: String,
+    onValueChange: (String) -> Unit,
+) {
+    Column {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                placeholder = { Text(placeholder, color = Muted) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+    }
+}
+
+@Composable
+private fun VersionFooter() {
+    val context = LocalContext.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 36.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BudgieMark()
+        Spacer(Modifier.size(14.dp))
+        Column {
+            TypewriterText("Version", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            TypewriterText(context.appVersionText(), color = Ink, fontSize = 16.sp, maxLines = 1)
         }
     }
 }
@@ -1498,6 +1730,12 @@ private fun String.formatNewsDate(): String =
 private fun android.content.Context.openUrl(url: String) {
     if (url.isBlank()) return
     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+}
+
+private fun Context.appVersionText(): String {
+    val packageInfo = packageManager.getPackageInfo(packageName, 0)
+    val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) packageInfo.longVersionCode else @Suppress("DEPRECATION") packageInfo.versionCode.toLong()
+    return "${packageInfo.versionName} [$code]"
 }
 
 @Composable
