@@ -1,6 +1,9 @@
 package com.budgienews.app
 
 import android.Manifest
+import android.app.Activity
+import android.app.KeyguardManager
+import android.hardware.biometrics.BiometricPrompt
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -11,9 +14,11 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.CancellationSignal
 import android.text.Html
 import android.util.Xml
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -106,21 +111,117 @@ private val FeedSources = listOf(
 )
 
 class MainActivity : ComponentActivity() {
+    private var isUnlocked by mutableStateOf(false)
+    private var authMessage by mutableStateOf("Unlock Budgie News to continue.")
+    private var authInProgress = false
+
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private val credentialLauncher =
+        registerForActivityResult(StartActivityForResult()) { result ->
+            authInProgress = false
+            if (result.resultCode == Activity.RESULT_OK) {
+                unlockApp()
+            } else {
+                authMessage = "Authentication cancelled."
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         BudgieNotifications.ensureChannels(this)
-        requestNotificationPermissionIfNeeded()
-        setContent { BudgieNewsTheme { NewsApp() } }
+        setContent {
+            BudgieNewsTheme {
+                if (isUnlocked) {
+                    NewsApp()
+                } else {
+                    LockedApp(authMessage, onUnlock = { authenticate() })
+                }
+            }
+        }
+        window.decorView.post { authenticate() }
     }
 
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private fun authenticate() {
+        if (isUnlocked || authInProgress) return
+        authInProgress = true
+        authMessage = "Waiting for authentication..."
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            authenticateWithBiometricPrompt()
+        } else {
+            authenticateWithDeviceCredential()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun authenticateWithBiometricPrompt() {
+        val keyguardManager = getSystemService(KeyguardManager::class.java)
+        if (!keyguardManager.isDeviceSecure) {
+            authInProgress = false
+            authMessage = "Set up biometrics or a screen lock to use Budgie News."
+            return
+        }
+
+        val prompt = BiometricPrompt.Builder(this)
+            .setTitle("Unlock Budgie News")
+            .setSubtitle("Use biometrics or your screen lock")
+            .setDescription("Authentication keeps your news app private.")
+            .setDeviceCredentialAllowed(true)
+            .build()
+
+        prompt.authenticate(
+            CancellationSignal(),
+            mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    authInProgress = false
+                    unlockApp()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    authInProgress = false
+                    authMessage = errString.toString().ifBlank { "Authentication failed." }
+                }
+
+                override fun onAuthenticationFailed() {
+                    authMessage = "Authentication did not match. Try again."
+                }
+            },
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private fun authenticateWithDeviceCredential() {
+        val keyguardManager = getSystemService(KeyguardManager::class.java)
+        if (!keyguardManager.isDeviceSecure) {
+            authInProgress = false
+            authMessage = "Set up a screen lock to use Budgie News."
+            return
+        }
+        val intent = keyguardManager.createConfirmDeviceCredentialIntent(
+            "Unlock Budgie News",
+            "Confirm your screen lock to continue.",
+        )
+        if (intent == null) {
+            authInProgress = false
+            authMessage = "Device authentication is unavailable."
+        } else {
+            credentialLauncher.launch(intent)
+        }
+    }
+
+    private fun unlockApp() {
+        isUnlocked = true
+        authMessage = "Unlocked."
+        requestNotificationPermissionIfNeeded()
     }
 }
 
@@ -148,6 +249,7 @@ private data class FeedItem(
     val source: String,
     val publishedAt: String,
     val imageUrl: String?,
+    val coverageSources: List<String> = listOf(source),
 )
 
 private data class FeedSource(
@@ -261,6 +363,30 @@ private fun LoadingNews(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun LockedApp(message: String, onUnlock: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Paper)
+            .padding(28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            BudgieMark()
+            Text("Budgie News", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text(message, color = Muted, lineHeight = 20.sp)
+            Button(
+                onClick = onUnlock,
+                shape = RoundedCornerShape(6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
+            ) {
+                Text("Unlock")
+            }
+        }
+    }
+}
+
+@Composable
 private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -302,6 +428,9 @@ private fun NewsList(
                 onSectionSelected = onSectionSelected,
                 onSourceSelected = onSourceSelected,
             )
+        }
+        item {
+            CoverageOverview(items, selectedSource)
         }
         item {
             FeedSourceNote(selectedSource)
@@ -388,6 +517,62 @@ private fun FeedSourceNote(selectedSource: SourceFilter) {
 }
 
 @Composable
+private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter) {
+    val visibleSources = items.map { it.source }.distinct().sorted()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        border = BorderStroke(1.dp, AccentSoft),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                MetricTile("Stories", items.size.toString(), Modifier.weight(1f))
+                MetricTile(
+                    "Outlets",
+                    if (selectedSource == SourceFilter.ALL) "${visibleSources.size}/${FeedSources.size}" else "1/${FeedSources.size}",
+                    Modifier.weight(1f),
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Coverage Lens", color = Ink, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Compare source framing before opening a story.",
+                        color = Muted,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FeedSources.forEach { source ->
+                        val active = source.name in visibleSources
+                        SourcePill(source.name.shortSourceName(), active)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .background(AccentSoft, RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Text(value, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(label, color = Muted, fontSize = 12.sp)
+    }
+}
+
+@Composable
 private fun EmptySection(section: NewsSection) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -420,11 +605,12 @@ private fun LeadStory(item: FeedItem?, section: NewsSection) {
         Column {
             RemoteImage(item.imageUrl, Modifier.fillMaxWidth().height(190.dp))
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(section.label, color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text(item.title, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp)
                 if (item.description.isNotBlank()) {
                     Text(item.description, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
                 }
+                CoverageRow(item)
                 StoryMeta(item)
             }
         }
@@ -450,11 +636,40 @@ private fun StoryCard(item: FeedItem) {
                 if (item.description.isNotBlank()) {
                     Text(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 18.sp)
                 }
+                CoverageRow(item)
                 StoryMeta(item)
             }
             Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
         }
     }
+}
+
+@Composable
+private fun CoverageRow(item: FeedItem) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Covered by ${item.coverageSources.size}/${FeedSources.size}",
+            color = Accent,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        item.coverageSources.take(2).forEach { source ->
+            SourcePill(source.shortSourceName(), active = true)
+        }
+    }
+}
+
+@Composable
+private fun SourcePill(label: String, active: Boolean) {
+    Text(
+        label,
+        color = if (active) Paper else Muted,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .background(if (active) Accent else AccentSoft, RoundedCornerShape(6.dp))
+            .padding(horizontal = 7.dp, vertical = 4.dp),
+    )
 }
 
 @Composable
@@ -516,12 +731,23 @@ private suspend fun fetchFeeds(section: NewsSection, sourceFilter: SourceFilter)
             error("No stories loaded from $sourceNames")
         }
         loadedItems.filterFor(section).take(24)
+            .withCoverageContext()
     }.fold(
         onSuccess = { items ->
             FeedState.Ready(items)
         },
         onFailure = { FeedState.Error(it.message ?: "Unexpected feed error") },
     )
+}
+
+private fun List<FeedItem>.withCoverageContext(): List<FeedItem> = map { item ->
+    val relatedSources = filter { candidate ->
+        candidate.source == item.source || item.relatedTo(candidate)
+    }
+        .map { it.source }
+        .distinct()
+        .sorted()
+    item.copy(coverageSources = relatedSources.ifEmpty { listOf(item.source) })
 }
 
 private fun fetchFeed(source: FeedSource): List<FeedItem> {
@@ -634,6 +860,15 @@ private fun FeedItem.matchesAny(vararg keywords: String): Boolean {
     return keywords.any { keyword -> haystack.contains(keyword) }
 }
 
+private fun FeedItem.relatedTo(other: FeedItem): Boolean {
+    if (this === other) return true
+    val mine = title.storyTokens()
+    val theirs = other.title.storyTokens()
+    if (mine.size < 3 || theirs.size < 3) return false
+    val overlap = mine.intersect(theirs).size
+    return overlap >= 3
+}
+
 private fun SourceFilter.tagline(section: NewsSection): String = when (this) {
     SourceFilter.ALL -> section.tagline
     else -> "${label} ${section.label.lowercase()}"
@@ -644,6 +879,34 @@ private fun SourceFilter.sourceNote(): String = when (this) {
     SourceFilter.BBC -> "Showing BBC UK stories only"
     SourceFilter.SKY -> "Showing Sky News UK stories only"
 }
+
+private fun String.shortSourceName(): String = when {
+    contains("BBC", ignoreCase = true) -> "BBC"
+    contains("Sky", ignoreCase = true) -> "Sky"
+    else -> this
+}
+
+private fun String.storyTokens(): Set<String> =
+    lowercase()
+        .split(Regex("""[^a-z0-9]+"""))
+        .filter { it.length >= 4 && it !in StoryStopWords }
+        .toSet()
+
+private val StoryStopWords = setOf(
+    "after",
+    "from",
+    "have",
+    "into",
+    "latest",
+    "more",
+    "news",
+    "over",
+    "says",
+    "that",
+    "their",
+    "this",
+    "with",
+)
 
 private fun XmlPullParser.readText(): String {
     if (next() != XmlPullParser.TEXT) return ""
@@ -736,6 +999,7 @@ private fun NewsPreview() {
                     source = "BBC UK",
                     publishedAt = "Jun 23, 7:10 PM",
                     imageUrl = null,
+                    coverageSources = listOf("BBC UK", "Sky News UK"),
                 ),
                 FeedItem(
                     title = "UK leaders respond as major policy announcements continue",
@@ -744,6 +1008,7 @@ private fun NewsPreview() {
                     source = "Sky News UK",
                     publishedAt = "Jun 23, 6:42 PM",
                     imageUrl = null,
+                    coverageSources = listOf("Sky News UK"),
                 ),
             ),
             selectedSection = NewsSection.HEADLINES,

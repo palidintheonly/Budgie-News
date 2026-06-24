@@ -1,14 +1,12 @@
 # Changelog
 
-## 0.0.3-alpha
+## 0.0.4-alpha
 
-- Added BBC and Sky buttons to the top menu for outlet-specific news views.
-- Localised the curated feeds to GB/UK news instead of world news.
-- Switched feeds to BBC UK and Sky News UK after verifying both RSS URLs return HTTP 200.
-- Fixed RSS image extraction for BBC and Sky media thumbnails.
-- Added source-specific feed notes and top-bar subtitles.
-- Added Android notification permission setup.
-- Added a system notification channel for future breaking-news alerts.
-
-
-
+- Reworked the main feed into a multi-news dashboard inspired by source-comparison news apps.
+- Added coverage metrics for visible story count and outlet coverage.
+- Added story-level coverage context to show which outlets appear to cover similar stories.
+- Added compact source pills for BBC and Sky coverage cues.
+- Added biometric/device-credential login before showing the news feed.
+- Added a locked screen with retry when authentication is cancelled or unavailable.
+- Added Firebase Google Services plugin setup.
+- Added Firebase Analytics dependency.
