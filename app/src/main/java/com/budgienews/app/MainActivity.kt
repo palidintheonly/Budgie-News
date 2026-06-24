@@ -51,6 +51,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -270,7 +271,7 @@ class MainActivity : ComponentActivity() {
 private object BudgieFirebase {
     fun setup() {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.6-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.7-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         Firebase.remoteConfig.setConfigSettingsAsync(
             remoteConfigSettings {
@@ -471,12 +472,12 @@ private enum class SourceFilter(val label: String, val sourceName: String?) {
     ALL("All", null),
     BBC("BBC", "BBC UK"),
     SKY("Sky", "Sky News UK"),
-    SKY_POLITICS("Sky Politics", "Sky Politics"),
+    SKY_POLITICS("Sky Pol", "Sky Politics"),
     GUARDIAN("Guardian", "Guardian UK"),
-    GUARDIAN_POLITICS("Guardian Politics", "Guardian Politics"),
-    INDEPENDENT("Independent", "Independent UK"),
-    DAILY_MAIL("Daily Mail", "Daily Mail News"),
-    SUN("The Sun", "The Sun News"),
+    GUARDIAN_POLITICS("Guard Pol", "Guardian Politics"),
+    INDEPENDENT("Indy", "Independent UK"),
+    DAILY_MAIL("Mail", "Daily Mail News"),
+    SUN("Sun", "The Sun News"),
     FT("FT", "Financial Times UK"),
 }
 
@@ -554,7 +555,7 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
                         BudgieMark()
                         Spacer(Modifier.size(10.dp))
                         Column {
-                            Text("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold)
+                            TypewriterText("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
                             TypewriterText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp)
                         }
                     }
@@ -683,8 +684,8 @@ private fun SettingsToggle(
         ) {
             Icon(Icons.Rounded.Notifications, contentDescription = null, tint = Accent, modifier = Modifier.size(22.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
-                Text(description, color = Muted, fontSize = 12.sp, lineHeight = 16.sp)
+                TypewriterText(title, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                TypewriterText(description, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 3)
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
@@ -705,7 +706,7 @@ private fun SettingsPicker(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("$title: $value", color = Ink, fontWeight = FontWeight.SemiBold)
+            TypewriterText("$title: $value", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(options) { option ->
                     AssistChip(
@@ -743,7 +744,7 @@ private fun TypewriterText(
     fontSize: TextUnit = TextUnit.Unspecified,
     fontWeight: FontWeight? = null,
     lineHeight: TextUnit = TextUnit.Unspecified,
-    maxLines: Int = Int.MAX_VALUE,
+    maxLines: Int = 3,
 ) {
     var visibleText by remember(text) { mutableStateOf("") }
     LaunchedEffect(text) {
@@ -776,8 +777,8 @@ private fun LockedApp(message: String, onUnlock: () -> Unit) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             BudgieMark()
-            Text("Budgie News", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text(message, color = Muted, lineHeight = 20.sp)
+            TypewriterText("Budgie News", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            TypewriterText(message, color = Muted, lineHeight = 20.sp, maxLines = 3)
             Button(
                 onClick = onUnlock,
                 shape = RoundedCornerShape(6.dp),
@@ -795,9 +796,9 @@ private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier =
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Alert, modifier = Modifier.size(42.dp))
             Spacer(Modifier.height(14.dp))
-            Text("Could not load the feed", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            TypewriterText("Could not load the feed", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Spacer(Modifier.height(8.dp))
-            Text(message, color = Muted, lineHeight = 20.sp)
+            TypewriterText(message, color = Muted, lineHeight = 20.sp, maxLines = 3)
             Spacer(Modifier.height(18.dp))
             Button(
                 onClick = onRetry,
@@ -912,7 +913,7 @@ private fun SectionMenu(
 
 @Composable
 private fun FeedSourceNote(selectedSource: SourceFilter) {
-    Text(
+    TypewriterText(
         selectedSource.sourceNote(),
         color = Muted,
         fontSize = 12.sp,
@@ -939,22 +940,19 @@ private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter
                     Modifier.weight(1f),
                 )
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Coverage Lens", color = Ink, fontWeight = FontWeight.SemiBold)
-                    Text(
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.fillMaxWidth()) {
+                    TypewriterText("Coverage Lens", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    TypewriterText(
                         "Compare source framing before opening a story.",
                         color = Muted,
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
+                        maxLines = 2,
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FeedSources.forEach { source ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(FeedSources) { source ->
                         val active = source.name in visibleSources
                         SourcePill(source.name.shortSourceName(), active)
                     }
@@ -971,8 +969,8 @@ private fun MetricTile(label: String, value: String, modifier: Modifier = Modifi
             .background(AccentSoft, RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
-        Text(value, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        Text(label, color = Muted, fontSize = 12.sp)
+        TypewriterText(value, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1)
+        TypewriterText(label, color = Muted, fontSize = 12.sp, maxLines = 1)
     }
 }
 
@@ -987,8 +985,8 @@ private fun EmptySection(section: NewsSection) {
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(28.dp))
-            Text(section.emptyText, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text("Try refresh, or switch to another menu section.", color = Muted, lineHeight = 20.sp)
+            TypewriterText(section.emptyText, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            TypewriterText("Try refresh, or switch to another menu section.", color = Muted, lineHeight = 20.sp, maxLines = 2)
         }
     }
 }
@@ -1014,10 +1012,10 @@ private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (F
             Column {
                 RemoteImage(item.imageUrl, Modifier.fillMaxWidth().height(190.dp))
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(item.title, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp)
+                    TypewriterText("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    TypewriterText(item.title, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp, maxLines = 4)
                     if (item.description.isNotBlank()) {
-                        Text(item.description, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
+                        TypewriterText(item.description, color = Muted, maxLines = 3, lineHeight = 20.sp)
                     }
                     CoverageRow(item)
                     StoryMeta(item)
@@ -1047,9 +1045,9 @@ private fun StoryCard(item: FeedItem, onStorySelected: (FeedItem) -> Unit) {
             Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 RemoteImage(item.imageUrl, Modifier.size(92.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(item.title, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
+                    TypewriterText(item.title, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 3, lineHeight = 20.sp)
                     if (item.description.isNotBlank()) {
-                        Text(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 18.sp)
+                        TypewriterText(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, lineHeight = 18.sp)
                     }
                     CoverageRow(item)
                     StoryMeta(item)
@@ -1082,7 +1080,7 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         SourcePill(item.source.shortSourceName(), active = true)
-                        Text(item.publishedAt, color = Muted, fontSize = 12.sp)
+                        TypewriterText(item.publishedAt, color = Muted, fontSize = 12.sp, maxLines = 1)
                     }
                     TypewriterText(item.title, color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp)
                     QuickRead(item)
@@ -1106,11 +1104,11 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
 @Composable
 private fun QuickRead(item: FeedItem) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text("Quick read", color = Accent, fontWeight = FontWeight.SemiBold)
+        TypewriterText("Quick read", color = Accent, fontWeight = FontWeight.SemiBold, maxLines = 1)
         item.quickReadPoints().forEach { point ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("-", color = Muted, lineHeight = 21.sp)
-                Text(point, color = Muted, lineHeight = 21.sp, modifier = Modifier.weight(1f))
+                TypewriterText(point, color = Muted, lineHeight = 21.sp, modifier = Modifier.weight(1f), maxLines = 5)
             }
         }
     }
@@ -1147,7 +1145,10 @@ private fun SourcePill(label: String, active: Boolean) {
         color = if (active) Paper else Muted,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier
+            .widthIn(max = 92.dp)
             .background(if (active) Accent else AccentSoft, RoundedCornerShape(6.dp))
             .padding(horizontal = 7.dp, vertical = 4.dp),
     )
@@ -1155,12 +1156,11 @@ private fun SourcePill(label: String, active: Boolean) {
 
 @Composable
 private fun StoryMeta(item: FeedItem) {
-    Text(
+    TypewriterText(
         listOf(item.source, item.publishedAt).filter { it.isNotBlank() }.joinToString("  |  "),
         color = Muted,
         fontSize = 12.sp,
         maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -1420,7 +1420,7 @@ private fun String.shortSourceName(): String = when {
     contains("BBC", ignoreCase = true) -> "BBC"
     contains("Sky", ignoreCase = true) -> "Sky"
     contains("Guardian", ignoreCase = true) -> "Guardian"
-    contains("Independent", ignoreCase = true) -> "Independent"
+    contains("Independent", ignoreCase = true) -> "Indy"
     contains("Daily Mail", ignoreCase = true) -> "Mail"
     contains("Sun", ignoreCase = true) -> "Sun"
     contains("Financial Times", ignoreCase = true) -> "FT"
