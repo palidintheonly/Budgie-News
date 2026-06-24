@@ -19,6 +19,7 @@ import android.provider.Settings
 import android.text.Html
 import android.util.Xml
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -119,7 +120,6 @@ import java.net.URLDecoder
 import java.net.URL
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeParseException
 
 private val Ink = Color(0xFFF8FAFC)
 private val Paper = Color(0xFF0B0F14)
@@ -133,6 +133,13 @@ private val Alert = Color(0xFFFFB86B)
 private val FeedSources = listOf(
     FeedSource("BBC UK", "https://feeds.bbci.co.uk/news/uk/rss.xml"),
     FeedSource("Sky News UK", "https://feeds.skynews.com/feeds/rss/uk.xml"),
+    FeedSource("Sky Politics", "https://feeds.skynews.com/feeds/rss/politics.xml"),
+    FeedSource("Guardian UK", "https://www.theguardian.com/uk/rss"),
+    FeedSource("Guardian Politics", "https://www.theguardian.com/politics/rss"),
+    FeedSource("Independent UK", "https://www.independent.co.uk/news/uk/rss"),
+    FeedSource("Daily Mail News", "https://www.dailymail.co.uk/news/index.rss"),
+    FeedSource("The Sun News", "https://www.thesun.co.uk/news/feed/"),
+    FeedSource("Financial Times UK", "https://www.ft.com/uk?format=rss"),
 )
 
 class MainActivity : ComponentActivity() {
@@ -464,6 +471,13 @@ private enum class SourceFilter(val label: String, val sourceName: String?) {
     ALL("All", null),
     BBC("BBC", "BBC UK"),
     SKY("Sky", "Sky News UK"),
+    SKY_POLITICS("Sky Politics", "Sky Politics"),
+    GUARDIAN("Guardian", "Guardian UK"),
+    GUARDIAN_POLITICS("Guardian Politics", "Guardian Politics"),
+    INDEPENDENT("Independent", "Independent UK"),
+    DAILY_MAIL("Daily Mail", "Daily Mail News"),
+    SUN("The Sun", "The Sun News"),
+    FT("FT", "Financial Times UK"),
 }
 
 private enum class NewsSection(
@@ -506,6 +520,11 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
     var settingsOpen by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     val scope = rememberCoroutineScope()
+
+    BackHandler(enabled = selectedItem != null || settingsOpen) {
+        selectedItem = null
+        settingsOpen = false
+    }
 
     fun saveSettings(updated: AppSettings) {
         settings = updated
@@ -1198,11 +1217,12 @@ private suspend fun fetchFeeds(
         val sources = FeedSources
             .filter { sourceFilter.sourceName == null || it.name == sourceFilter.sourceName }
         val loadedItems = sources
-            .flatMap { source ->
+            .map { source ->
                 runCatching { fetchFeed(source).take(12) }
                     .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
                     .getOrDefault(emptyList())
             }
+            .interleaved()
             .distinctBy { it.link.ifBlank { it.title } }
         val availableItems = if (loadedItems.isNotEmpty()) {
             BudgieCache.save(context, loadedItems)
@@ -1233,6 +1253,17 @@ private suspend fun fetchFeeds(
             FeedState.Error(it.message ?: "Unexpected feed error")
         },
     )
+}
+
+private fun List<List<FeedItem>>.interleaved(): List<FeedItem> {
+    val result = mutableListOf<FeedItem>()
+    val maxSize = maxOfOrNull { it.size } ?: return result
+    for (index in 0 until maxSize) {
+        forEach { sourceItems ->
+            sourceItems.getOrNull(index)?.let(result::add)
+        }
+    }
+    return result
 }
 
 private fun List<FeedItem>.withCoverageContext(): List<FeedItem> = map { item ->
@@ -1271,15 +1302,17 @@ private fun parseRss(parser: XmlPullParser, fallbackSource: String): List<FeedIt
     val items = mutableListOf<FeedItem>()
     var event = parser.eventType
     while (event != XmlPullParser.END_DOCUMENT) {
-        if (event == XmlPullParser.START_TAG && parser.name.equals("item", ignoreCase = true)) {
-            items += readItem(parser, fallbackSource)
+        if (event == XmlPullParser.START_TAG &&
+            (parser.name.equals("item", ignoreCase = true) || parser.name.equals("entry", ignoreCase = true))
+        ) {
+            items += readItem(parser, fallbackSource, parser.name)
         }
         event = parser.next()
     }
     return items.take(40)
 }
 
-private fun readItem(parser: XmlPullParser, fallbackSource: String): FeedItem {
+private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag: String): FeedItem {
     var title = ""
     var description = ""
     var link = ""
@@ -1288,18 +1321,27 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String): FeedItem {
     var imageUrl: String? = null
 
     while (parser.next() != XmlPullParser.END_DOCUMENT) {
-        if (parser.eventType == XmlPullParser.END_TAG && parser.name.equals("item", ignoreCase = true)) break
+        if (parser.eventType == XmlPullParser.END_TAG && parser.name.equals(containerTag, ignoreCase = true)) break
         if (parser.eventType != XmlPullParser.START_TAG) continue
 
         when (parser.name.lowercase()) {
             "title" -> title = parser.readText()
             "description" -> description = parser.readText().stripHtml()
-            "link" -> link = parser.readText()
-            "pubdate" -> pubDate = parser.readText().formatRssDate()
+            "summary" -> description = parser.readText().stripHtml()
+            "link" -> {
+                val href = parser.attributeValue("href")
+                if (href.isNullOrBlank()) {
+                    link = parser.readText()
+                } else {
+                    link = href
+                    parser.skipTag()
+                }
+            }
+            "pubdate", "published", "updated" -> pubDate = parser.readText().formatNewsDate()
             "source" -> source = parser.readText().ifBlank { source }
             "enclosure" -> imageUrl = parser.attributeValue("url") ?: imageUrl
             "thumbnail", "media:thumbnail", "media:content" -> imageUrl = parser.attributeValue("url") ?: imageUrl
-            "content:encoded" -> {
+            "content:encoded", "content" -> {
                 val encodedContent = parser.readText()
                 imageUrl = encodedContent.firstImageUrl() ?: imageUrl
                 if (description.isBlank()) description = encodedContent.stripHtml()
@@ -1370,14 +1412,18 @@ private fun SourceFilter.tagline(section: NewsSection): String = when (this) {
 }
 
 private fun SourceFilter.sourceNote(): String = when (this) {
-    SourceFilter.ALL -> "Using 2 curated GB feeds: BBC UK and Sky News UK"
-    SourceFilter.BBC -> "Showing BBC UK stories only"
-    SourceFilter.SKY -> "Showing Sky News UK stories only"
+    SourceFilter.ALL -> "Using ${FeedSources.size} curated UK/GB feeds"
+    else -> "Showing $label stories only"
 }
 
 private fun String.shortSourceName(): String = when {
     contains("BBC", ignoreCase = true) -> "BBC"
     contains("Sky", ignoreCase = true) -> "Sky"
+    contains("Guardian", ignoreCase = true) -> "Guardian"
+    contains("Independent", ignoreCase = true) -> "Independent"
+    contains("Daily Mail", ignoreCase = true) -> "Mail"
+    contains("Sun", ignoreCase = true) -> "Sun"
+    contains("Financial Times", ignoreCase = true) -> "FT"
     else -> this
 }
 
@@ -1442,11 +1488,12 @@ private fun String.extractNestedImageUrl(): String {
     return if (nestedUrl.isNullOrBlank()) this else URLDecoder.decode(nestedUrl, Charsets.UTF_8.name())
 }
 
-private fun String.formatRssDate(): String = try {
-    DateTimeFormatter.ofPattern("MMM d, h:mm a").format(ZonedDateTime.parse(this, DateTimeFormatter.RFC_1123_DATE_TIME))
-} catch (_: DateTimeParseException) {
-    this
-}
+private fun String.formatNewsDate(): String =
+    runCatching {
+        DateTimeFormatter.ofPattern("MMM d, h:mm a").format(ZonedDateTime.parse(this, DateTimeFormatter.RFC_1123_DATE_TIME))
+    }.recoverCatching {
+        DateTimeFormatter.ofPattern("MMM d, h:mm a").format(ZonedDateTime.parse(this))
+    }.getOrDefault(this)
 
 private fun android.content.Context.openUrl(url: String) {
     if (url.isBlank()) return
