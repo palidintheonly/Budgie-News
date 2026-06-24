@@ -11,9 +11,7 @@
 - Added Firestore account/settings sync.
 - Added Firestore device token registration for push delivery.
 - Added Firestore live article listener for instant in-app feed updates.
-- Switched pushed article fetches from the old backend API to Firestore documents.
-- Added Firebase Cloud Functions setup for Firestore article publish pushes.
-- Added Firestore security rules and indexes for Firebase-only data storage.
-- Removed the custom MySQL/backend module from Gradle sync.
+- Added backend article publishing, article fetch, and FCM data push endpoints.
+- Added backend DB healing for articles and device token tables.
+- Added light backend push queue records for article publish attempts.
 - Limited locally pushed articles to the last 24 hours.
-- Set `versionName` to `0.0.9-alpha`.
