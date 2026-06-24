@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.0.5-alpha"
+        versionName = "0.0.6-alpha"
     }
 
     buildFeatures {
@@ -32,8 +32,14 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-crashlytics")
+    implementation("com.google.firebase:firebase-perf")
+    implementation("com.google.firebase:firebase-config")
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-inappmessaging-display")
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
     implementation("io.coil-kt.coil3:coil-compose:3.4.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.4.0")
+    implementation("androidx.compose.animation:animation")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation("androidx.core:core-ktx:1.17.0")

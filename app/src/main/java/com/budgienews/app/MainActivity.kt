@@ -25,6 +25,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -81,17 +89,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.google.firebase.Firebase
+import com.google.firebase.analytics.analytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.google.firebase.messaging.messaging
+import com.google.firebase.perf.FirebasePerformance
+import com.google.firebase.remoteconfig.remoteConfig
+import com.google.firebase.remoteconfig.remoteConfigSettings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -140,6 +157,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         BudgieNotifications.ensureChannels(this)
+        BudgieFirebase.setup()
         if (!BudgiePrefs.load(this).biometricEnabled) {
             isUnlocked = true
         }
@@ -239,6 +257,25 @@ class MainActivity : ComponentActivity() {
         isUnlocked = true
         authMessage = "Unlocked."
         requestNotificationPermissionIfNeeded()
+    }
+}
+
+private object BudgieFirebase {
+    fun setup() {
+        Firebase.analytics.logEvent("budgie_app_open", null)
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.6-alpha")
+        FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
+        Firebase.remoteConfig.setConfigSettingsAsync(
+            remoteConfigSettings {
+                minimumFetchIntervalInSeconds = 3600
+            },
+        )
+        Firebase.remoteConfig.fetchAndActivate()
+        Firebase.messaging.token.addOnSuccessListener { token ->
+            FirebaseCrashlytics.getInstance().setCustomKey("fcm_token_ready", token.isNotBlank())
+        }.addOnFailureListener { error ->
+            FirebaseCrashlytics.getInstance().recordException(error)
+        }
     }
 }
 
@@ -499,7 +536,7 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
                         Spacer(Modifier.size(10.dp))
                         Column {
                             Text("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold)
-                            Text(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp)
+                            TypewriterText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp)
                         }
                     }
                 },
@@ -674,9 +711,39 @@ private fun LoadingNews(modifier: Modifier = Modifier) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = Accent, strokeWidth = 3.dp)
             Spacer(Modifier.height(16.dp))
-            Text("Fetching latest headlines", color = Ink, fontWeight = FontWeight.Medium)
+            TypewriterText("Fetching latest headlines", color = Ink, fontWeight = FontWeight.Medium)
         }
     }
+}
+
+@Composable
+private fun TypewriterText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Ink,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontWeight: FontWeight? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    maxLines: Int = Int.MAX_VALUE,
+) {
+    var visibleText by remember(text) { mutableStateOf("") }
+    LaunchedEffect(text) {
+        visibleText = ""
+        text.indices.forEach { index ->
+            visibleText = text.take(index + 1)
+            delay(18)
+        }
+    }
+    Text(
+        visibleText,
+        modifier = modifier,
+        color = color,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
+        lineHeight = lineHeight,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -910,25 +977,32 @@ private fun EmptySection(section: NewsSection) {
 @Composable
 private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (FeedItem) -> Unit) {
     if (item == null) return
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onStorySelected(item) },
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceRaised),
-        border = BorderStroke(1.dp, AccentSoft),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    var visible by remember(item.link) { mutableStateOf(false) }
+    LaunchedEffect(item.link) { visible = true }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(350)) + slideInVertically(animationSpec = tween(350)) { it / 8 },
     ) {
-        Column {
-            RemoteImage(item.imageUrl, Modifier.fillMaxWidth().height(190.dp))
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text(item.title, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp)
-                if (item.description.isNotBlank()) {
-                    Text(item.description, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onStorySelected(item) },
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceRaised),
+            border = BorderStroke(1.dp, AccentSoft),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column {
+                RemoteImage(item.imageUrl, Modifier.fillMaxWidth().height(190.dp))
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(item.title, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp)
+                    if (item.description.isNotBlank()) {
+                        Text(item.description, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
+                    }
+                    CoverageRow(item)
+                    StoryMeta(item)
                 }
-                CoverageRow(item)
-                StoryMeta(item)
             }
         }
     }
@@ -936,26 +1010,33 @@ private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (F
 
 @Composable
 private fun StoryCard(item: FeedItem, onStorySelected: (FeedItem) -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onStorySelected(item) },
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        border = BorderStroke(1.dp, Color(0xFF26313B)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    var visible by remember(item.link) { mutableStateOf(false) }
+    LaunchedEffect(item.link) { visible = true }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(300)) + slideInVertically(animationSpec = tween(300)) { it / 10 },
     ) {
-        Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            RemoteImage(item.imageUrl, Modifier.size(92.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(item.title, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
-                if (item.description.isNotBlank()) {
-                    Text(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 18.sp)
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onStorySelected(item) },
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+            border = BorderStroke(1.dp, Color(0xFF26313B)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                RemoteImage(item.imageUrl, Modifier.size(92.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(item.title, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
+                    if (item.description.isNotBlank()) {
+                        Text(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 18.sp)
+                    }
+                    CoverageRow(item)
+                    StoryMeta(item)
                 }
-                CoverageRow(item)
-                StoryMeta(item)
+                Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
             }
-            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -984,7 +1065,7 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
                         SourcePill(item.source.shortSourceName(), active = true)
                         Text(item.publishedAt, color = Muted, fontSize = 12.sp)
                     }
-                    Text(item.title, color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp)
+                    TypewriterText(item.title, color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp)
                     QuickRead(item)
                     CoverageRow(item)
                     Button(
@@ -1066,8 +1147,22 @@ private fun StoryMeta(item: FeedItem) {
 
 @Composable
 private fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "imagePlaceholderPulse")
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.65f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(900), repeatMode = RepeatMode.Reverse),
+        label = "imagePlaceholderAlpha",
+    )
     Box(modifier.background(AccentSoft, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
-        Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(30.dp))
+        Icon(
+            Icons.AutoMirrored.Rounded.Article,
+            contentDescription = null,
+            tint = Accent,
+            modifier = Modifier
+                .size(30.dp)
+                .graphicsLayer(alpha = pulse),
+        )
         AsyncImage(
             model = url,
             contentDescription = null,
