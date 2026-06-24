@@ -1,12 +1,12 @@
 # Changelog
 
-## 0.0.4-alpha
+## 0.0.5-alpha
 
-- Reworked the main feed into a multi-news dashboard inspired by source-comparison news apps.
-- Added coverage metrics for visible story count and outlet coverage.
-- Added story-level coverage context to show which outlets appear to cover similar stories.
-- Added compact source pills for BBC and Sky coverage cues.
-- Added biometric/device-credential login before showing the news feed.
-- Added a locked screen with retry when authentication is cancelled or unavailable.
-- Added Firebase Google Services plugin setup.
-- Added Firebase Analytics dependency.
+- Added an in-app story detail page when tapping a news post.
+- Added a quick-read section with the main article points before sending users to the outlet.
+- Added a `Read official source` button from the story page to the outlet website.
+- Added offline feed caching so the last loaded news can still display after feed failures.
+- Switched story image loading to Coil with image caching.
+- Added a settings screen for biometric login, notifications, default section, and default outlet.
+- Added separate Breaking and Important notification channels with different system sounds.
+- Added Firebase Crashlytics for crash and feed-error visibility.

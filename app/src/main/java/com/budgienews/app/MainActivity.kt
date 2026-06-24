@@ -6,15 +6,16 @@ import android.app.KeyguardManager
 import android.hardware.biometrics.BiometricPrompt
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
+import android.provider.Settings
 import android.text.Html
 import android.util.Xml
 import androidx.activity.ComponentActivity
@@ -23,6 +24,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -45,10 +47,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -62,6 +67,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -69,14 +75,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -85,9 +89,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.net.HttpURLConnection
 import java.net.URLDecoder
@@ -132,16 +140,25 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         BudgieNotifications.ensureChannels(this)
+        if (!BudgiePrefs.load(this).biometricEnabled) {
+            isUnlocked = true
+        }
         setContent {
             BudgieNewsTheme {
                 if (isUnlocked) {
-                    NewsApp()
+                    NewsApp(onBiometricSettingChanged = { enabled ->
+                        if (enabled) authenticate()
+                    })
                 } else {
                     LockedApp(authMessage, onUnlock = { authenticate() })
                 }
             }
         }
-        window.decorView.post { authenticate() }
+        if (!isUnlocked) {
+            window.decorView.post { authenticate() }
+        } else {
+            requestNotificationPermissionIfNeeded()
+        }
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -227,18 +244,159 @@ class MainActivity : ComponentActivity() {
 
 private object BudgieNotifications {
     const val BREAKING_CHANNEL_ID = "budgie_news_breaking"
+    const val IMPORTANT_CHANNEL_ID = "budgie_news_important"
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        val channel = NotificationChannel(
-            BREAKING_CHANNEL_ID,
-            "Breaking news",
-            NotificationManager.IMPORTANCE_DEFAULT,
-        ).apply {
-            description = "Important Budgie News alerts"
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        manager.createNotificationChannels(
+            listOf(
+                NotificationChannel(
+                    BREAKING_CHANNEL_ID,
+                    "Breaking news",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "Breaking Budgie News alerts"
+                    setSound(Settings.System.DEFAULT_NOTIFICATION_URI, audioAttributes)
+                },
+                NotificationChannel(
+                    IMPORTANT_CHANNEL_ID,
+                    "Important news",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "Important Budgie News alerts"
+                    setSound(Settings.System.DEFAULT_ALARM_ALERT_URI, audioAttributes)
+                },
+            ),
+        )
+    }
+
+    fun notifyFor(context: Context, section: NewsSection, item: FeedItem) {
+        if (section == NewsSection.HEADLINES) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val channelId = when (section) {
+            NewsSection.BREAKING -> BREAKING_CHANNEL_ID
+            NewsSection.IMPORTANT -> IMPORTANT_CHANNEL_ID
+            NewsSection.HEADLINES -> return
         }
-        manager.createNotificationChannel(channel)
+        val intent = Intent(context, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            section.ordinal,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.mipmap.budgie_icon)
+            .setContentTitle("${section.label}: ${item.source.shortSourceName()}")
+            .setContentText(item.title)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(item.title))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(if (section == NewsSection.IMPORTANT) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+
+        context.getSystemService(NotificationManager::class.java)
+            .notify(section.ordinal + item.link.hashCode(), notification)
+    }
+}
+
+private object BudgiePrefs {
+    private const val PREFS = "budgie_news_settings"
+    private const val KEY_BIOMETRIC = "biometric_enabled"
+    private const val KEY_BREAKING = "breaking_notifications"
+    private const val KEY_IMPORTANT = "important_notifications"
+    private const val KEY_SECTION = "default_section"
+    private const val KEY_SOURCE = "default_source"
+    private const val KEY_LAST_BREAKING = "last_breaking_link"
+    private const val KEY_LAST_IMPORTANT = "last_important_link"
+
+    fun load(context: Context): AppSettings {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return AppSettings(
+            biometricEnabled = prefs.getBoolean(KEY_BIOMETRIC, true),
+            breakingNotificationsEnabled = prefs.getBoolean(KEY_BREAKING, true),
+            importantNotificationsEnabled = prefs.getBoolean(KEY_IMPORTANT, true),
+            defaultSection = prefs.getString(KEY_SECTION, null)?.let { runCatching { NewsSection.valueOf(it) }.getOrNull() } ?: NewsSection.HEADLINES,
+            defaultSource = prefs.getString(KEY_SOURCE, null)?.let { runCatching { SourceFilter.valueOf(it) }.getOrNull() } ?: SourceFilter.ALL,
+        )
+    }
+
+    fun save(context: Context, settings: AppSettings) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_BIOMETRIC, settings.biometricEnabled)
+            .putBoolean(KEY_BREAKING, settings.breakingNotificationsEnabled)
+            .putBoolean(KEY_IMPORTANT, settings.importantNotificationsEnabled)
+            .putString(KEY_SECTION, settings.defaultSection.name)
+            .putString(KEY_SOURCE, settings.defaultSource.name)
+            .apply()
+    }
+
+    fun shouldNotify(context: Context, section: NewsSection, item: FeedItem, settings: AppSettings): Boolean {
+        val enabled = when (section) {
+            NewsSection.BREAKING -> settings.breakingNotificationsEnabled
+            NewsSection.IMPORTANT -> settings.importantNotificationsEnabled
+            NewsSection.HEADLINES -> false
+        }
+        if (!enabled || item.link.isBlank()) return false
+        val key = if (section == NewsSection.BREAKING) KEY_LAST_BREAKING else KEY_LAST_IMPORTANT
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString(key, "") == item.link) return false
+        prefs.edit().putString(key, item.link).apply()
+        return true
+    }
+}
+
+private object BudgieCache {
+    private const val PREFS = "budgie_news_cache"
+    private const val KEY_ITEMS = "items"
+
+    fun save(context: Context, items: List<FeedItem>) {
+        val array = JSONArray()
+        items.take(80).forEach { item ->
+            array.put(
+                JSONObject()
+                    .put("title", item.title)
+                    .put("description", item.description)
+                    .put("link", item.link)
+                    .put("source", item.source)
+                    .put("publishedAt", item.publishedAt)
+                    .put("imageUrl", item.imageUrl.orEmpty()),
+            )
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ITEMS, array.toString())
+            .apply()
+    }
+
+    fun load(context: Context): List<FeedItem> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ITEMS, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            List(array.length()) { index ->
+                val item = array.getJSONObject(index)
+                FeedItem(
+                    title = item.optString("title"),
+                    description = item.optString("description"),
+                    link = item.optString("link"),
+                    source = item.optString("source"),
+                    publishedAt = item.optString("publishedAt"),
+                    imageUrl = item.optString("imageUrl").takeIf { it.isNotBlank() },
+                )
+            }
+        }.getOrElse {
+            FirebaseCrashlytics.getInstance().recordException(it)
+            emptyList()
+        }
     }
 }
 
@@ -255,6 +413,14 @@ private data class FeedItem(
 private data class FeedSource(
     val name: String,
     val url: String,
+)
+
+private data class AppSettings(
+    val biometricEnabled: Boolean = true,
+    val breakingNotificationsEnabled: Boolean = true,
+    val importantNotificationsEnabled: Boolean = true,
+    val defaultSection: NewsSection = NewsSection.HEADLINES,
+    val defaultSource: SourceFilter = SourceFilter.ALL,
 )
 
 private enum class SourceFilter(val label: String, val sourceName: String?) {
@@ -293,23 +459,33 @@ private sealed interface FeedState {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NewsApp() {
+private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
+    val context = LocalContext.current
+    var settings by remember { mutableStateOf(BudgiePrefs.load(context)) }
     var refreshToken by remember { mutableStateOf(0) }
-    var selectedSection by remember { mutableStateOf(NewsSection.HEADLINES) }
-    var selectedSource by remember { mutableStateOf(SourceFilter.ALL) }
+    var selectedSection by remember { mutableStateOf(settings.defaultSection) }
+    var selectedSource by remember { mutableStateOf(settings.defaultSource) }
+    var selectedItem by remember { mutableStateOf<FeedItem?>(null) }
+    var settingsOpen by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     val scope = rememberCoroutineScope()
+
+    fun saveSettings(updated: AppSettings) {
+        settings = updated
+        BudgiePrefs.save(context, updated)
+        onBiometricSettingChanged(updated.biometricEnabled)
+    }
 
     fun refresh() {
         state = FeedState.Loading
         scope.launch {
-            state = fetchFeeds(selectedSection, selectedSource)
+            state = fetchFeeds(context, selectedSection, selectedSource, settings)
         }
     }
 
-    LaunchedEffect(refreshToken, selectedSection, selectedSource) {
+    LaunchedEffect(refreshToken, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled) {
         state = FeedState.Loading
-        state = fetchFeeds(selectedSection, selectedSource)
+        state = fetchFeeds(context, selectedSection, selectedSource, settings)
     }
 
     Scaffold(
@@ -328,25 +504,166 @@ private fun NewsApp() {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { refreshToken++ }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh news", tint = Ink)
+                    if (selectedItem == null && !settingsOpen) {
+                        IconButton(onClick = { settingsOpen = true }) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = Ink)
+                        }
+                        IconButton(onClick = { refreshToken++ }) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh news", tint = Ink)
+                        }
+                    }
+                },
+                navigationIcon = {
+                    if (selectedItem != null || settingsOpen) {
+                        IconButton(onClick = {
+                            selectedItem = null
+                            settingsOpen = false
+                        }) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to news", tint = Ink)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Paper),
             )
         },
     ) { padding ->
-        when (val value = state) {
-            FeedState.Loading -> LoadingNews(Modifier.padding(padding))
-            is FeedState.Error -> ErrorNews(value.message, ::refresh, Modifier.padding(padding))
-            is FeedState.Ready -> NewsList(
-                items = value.items,
-                selectedSection = selectedSection,
-                selectedSource = selectedSource,
-                onSectionSelected = { selectedSection = it },
-                onSourceSelected = { selectedSource = it },
+        val detailItem = selectedItem
+        if (settingsOpen) {
+            SettingsScreen(
+                settings = settings,
+                onSettingsChanged = ::saveSettings,
                 modifier = Modifier.padding(padding),
             )
+        } else if (detailItem != null) {
+            StoryDetail(detailItem, modifier = Modifier.padding(padding))
+        } else {
+            when (val value = state) {
+                FeedState.Loading -> LoadingNews(Modifier.padding(padding))
+                is FeedState.Error -> ErrorNews(value.message, ::refresh, Modifier.padding(padding))
+                is FeedState.Ready -> NewsList(
+                    items = value.items,
+                    selectedSection = selectedSection,
+                    selectedSource = selectedSource,
+                    onSectionSelected = { selectedSection = it },
+                    onSourceSelected = { selectedSource = it },
+                    onStorySelected = { selectedItem = it },
+                    modifier = Modifier.padding(padding),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    settings: AppSettings,
+    onSettingsChanged: (AppSettings) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            SettingsToggle(
+                title = "Biometric login",
+                description = "Require device authentication when opening Budgie News.",
+                checked = settings.biometricEnabled,
+                onCheckedChange = { onSettingsChanged(settings.copy(biometricEnabled = it)) },
+            )
+        }
+        item {
+            SettingsToggle(
+                title = "Breaking alerts",
+                description = "Notify only when the Breaking feed finds a new story.",
+                checked = settings.breakingNotificationsEnabled,
+                onCheckedChange = { onSettingsChanged(settings.copy(breakingNotificationsEnabled = it)) },
+            )
+        }
+        item {
+            SettingsToggle(
+                title = "Important alerts",
+                description = "Notify only when the Important feed finds a new story.",
+                checked = settings.importantNotificationsEnabled,
+                onCheckedChange = { onSettingsChanged(settings.copy(importantNotificationsEnabled = it)) },
+            )
+        }
+        item {
+            SettingsPicker(
+                title = "Default section",
+                value = settings.defaultSection.label,
+                options = NewsSection.entries.map { it.label to { onSettingsChanged(settings.copy(defaultSection = it)) } },
+            )
+        }
+        item {
+            SettingsPicker(
+                title = "Default outlet",
+                value = settings.defaultSource.label,
+                options = SourceFilter.entries.map { it.label to { onSettingsChanged(settings.copy(defaultSource = it)) } },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggle(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        border = BorderStroke(1.dp, AccentSoft),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Row(
+            Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Notifications, contentDescription = null, tint = Accent, modifier = Modifier.size(22.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
+                Text(description, color = Muted, fontSize = 12.sp, lineHeight = 16.sp)
+            }
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
+}
+
+@Composable
+private fun SettingsPicker(
+    title: String,
+    value: String,
+    options: List<Pair<String, () -> Unit>>,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        border = BorderStroke(1.dp, AccentSoft),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("$title: $value", color = Ink, fontWeight = FontWeight.SemiBold)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(options) { option ->
+                    AssistChip(
+                        onClick = option.second,
+                        label = { Text(option.first) },
+                        shape = RoundedCornerShape(6.dp),
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (option.first == value) Accent else SurfaceRaised,
+                            labelColor = if (option.first == value) Paper else Ink,
+                        ),
+                        border = BorderStroke(1.dp, if (option.first == value) Accent else AccentSoft),
+                    )
+                }
+            }
         }
     }
 }
@@ -414,6 +731,7 @@ private fun NewsList(
     selectedSource: SourceFilter,
     onSectionSelected: (NewsSection) -> Unit,
     onSourceSelected: (SourceFilter) -> Unit,
+    onStorySelected: (FeedItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -441,10 +759,10 @@ private fun NewsList(
             }
         } else {
             item {
-                LeadStory(items.firstOrNull(), selectedSection)
+                LeadStory(items.firstOrNull(), selectedSection, onStorySelected)
             }
             items(items.drop(1)) { item ->
-                StoryCard(item)
+                StoryCard(item, onStorySelected)
             }
         }
     }
@@ -590,13 +908,12 @@ private fun EmptySection(section: NewsSection) {
 }
 
 @Composable
-private fun LeadStory(item: FeedItem?, section: NewsSection) {
+private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (FeedItem) -> Unit) {
     if (item == null) return
-    val context = LocalContext.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { context.openUrl(item.link) },
+            .clickable { onStorySelected(item) },
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceRaised),
         border = BorderStroke(1.dp, AccentSoft),
@@ -618,12 +935,11 @@ private fun LeadStory(item: FeedItem?, section: NewsSection) {
 }
 
 @Composable
-private fun StoryCard(item: FeedItem) {
-    val context = LocalContext.current
+private fun StoryCard(item: FeedItem, onStorySelected: (FeedItem) -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { context.openUrl(item.link) },
+            .clickable { onStorySelected(item) },
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
         border = BorderStroke(1.dp, Color(0xFF26313B)),
@@ -642,6 +958,71 @@ private fun StoryCard(item: FeedItem) {
             Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
         }
     }
+}
+
+@Composable
+private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            RemoteImage(item.imageUrl, Modifier.fillMaxWidth().height(220.dp))
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                border = BorderStroke(1.dp, AccentSoft),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SourcePill(item.source.shortSourceName(), active = true)
+                        Text(item.publishedAt, color = Muted, fontSize = 12.sp)
+                    }
+                    Text(item.title, color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp)
+                    QuickRead(item)
+                    CoverageRow(item)
+                    Button(
+                        onClick = { context.openUrl(item.link) },
+                        enabled = item.link.isNotBlank(),
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("Read official source")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickRead(item: FeedItem) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text("Quick read", color = Accent, fontWeight = FontWeight.SemiBold)
+        item.quickReadPoints().forEach { point ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("-", color = Muted, lineHeight = 21.sp)
+                Text(point, color = Muted, lineHeight = 21.sp, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+private fun FeedItem.quickReadPoints(): List<String> {
+    val points = mutableListOf<String>()
+    points += "Main story: $title"
+    if (description.isNotBlank()) points += description
+    points += "Source: $source${publishedAt.takeIf { it.isNotBlank() }?.let { " | $it" }.orEmpty()}"
+    points += "Coverage: ${coverageSources.joinToString { it.shortSourceName() }}"
+    return points
 }
 
 @Composable
@@ -685,20 +1066,14 @@ private fun StoryMeta(item: FeedItem) {
 
 @Composable
 private fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
-    val bitmap by produceState<Bitmap?>(initialValue = null, url) {
-        value = withContext(Dispatchers.IO) { url?.let(::loadBitmap) }
-    }
     Box(modifier.background(AccentSoft, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(30.dp))
-        }
+        Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(30.dp))
+        AsyncImage(
+            model = url,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
     }
 }
 
@@ -718,25 +1093,50 @@ private fun BudgieMark() {
     }
 }
 
-private suspend fun fetchFeeds(section: NewsSection, sourceFilter: SourceFilter): FeedState = withContext(Dispatchers.IO) {
+private suspend fun fetchFeeds(
+    context: Context,
+    section: NewsSection,
+    sourceFilter: SourceFilter,
+    settings: AppSettings,
+): FeedState = withContext(Dispatchers.IO) {
     runCatching {
-        val loadedItems = FeedSources
+        val sources = FeedSources
             .filter { sourceFilter.sourceName == null || it.name == sourceFilter.sourceName }
-            .flatMap { source -> runCatching { fetchFeed(source).take(12) }.getOrDefault(emptyList()) }
+        val loadedItems = sources
+            .flatMap { source ->
+                runCatching { fetchFeed(source).take(12) }
+                    .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                    .getOrDefault(emptyList())
+            }
             .distinctBy { it.link.ifBlank { it.title } }
-        if (loadedItems.isEmpty()) {
-            val sourceNames = FeedSources
-                .filter { sourceFilter.sourceName == null || it.name == sourceFilter.sourceName }
-                .joinToString { it.name }
+        val availableItems = if (loadedItems.isNotEmpty()) {
+            BudgieCache.save(context, loadedItems)
+            loadedItems
+        } else {
+            BudgieCache.load(context)
+                .filter { item -> sourceFilter.sourceName == null || item.source == sourceFilter.sourceName }
+                .distinctBy { it.link.ifBlank { it.title } }
+        }
+        if (availableItems.isEmpty()) {
+            val sourceNames = sources.joinToString { it.name }
             error("No stories loaded from $sourceNames")
         }
-        loadedItems.filterFor(section).take(24)
+        val filteredItems = availableItems.filterFor(section).take(24)
             .withCoverageContext()
+        filteredItems.firstOrNull()?.let { firstItem ->
+            if (BudgiePrefs.shouldNotify(context, section, firstItem, settings)) {
+                BudgieNotifications.notifyFor(context, section, firstItem)
+            }
+        }
+        filteredItems
     }.fold(
         onSuccess = { items ->
             FeedState.Ready(items)
         },
-        onFailure = { FeedState.Error(it.message ?: "Unexpected feed error") },
+        onFailure = {
+            FirebaseCrashlytics.getInstance().recordException(it)
+            FeedState.Error(it.message ?: "Unexpected feed error")
+        },
     )
 }
 
@@ -953,19 +1353,6 @@ private fun String.formatRssDate(): String = try {
     this
 }
 
-private fun loadBitmap(url: String): Bitmap? = runCatching {
-    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 8_000
-        readTimeout = 10_000
-        setRequestProperty("User-Agent", "Budgie News Android")
-    }
-    try {
-        connection.inputStream.use(BitmapFactory::decodeStream)
-    } finally {
-        connection.disconnect()
-    }
-}.getOrNull()
-
 private fun android.content.Context.openUrl(url: String) {
     if (url.isBlank()) return
     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
@@ -1015,6 +1402,7 @@ private fun NewsPreview() {
             selectedSource = SourceFilter.ALL,
             onSectionSelected = {},
             onSourceSelected = {},
+            onStorySelected = {},
             modifier = Modifier.background(Paper),
         )
     }
