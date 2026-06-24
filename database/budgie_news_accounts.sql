@@ -31,3 +31,6 @@ CREATE TABLE IF NOT EXISTS technical_feedback (
         FOREIGN KEY (user_id) REFERENCES users(id)
         ON DELETE SET NULL
 );
+
+-- The Budgie News backend also performs automatic schema healing on startup and before account sync.
+-- It creates missing tables, adds missing columns, and restores known indexes/foreign keys where possible.
