@@ -10,6 +10,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
@@ -85,6 +87,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -106,7 +109,14 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.analytics
+import com.google.firebase.auth.EmailAuthProvider
+import com.google.firebase.auth.auth
 import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.firestore
 import com.google.firebase.messaging.messaging
 import com.google.firebase.perf.FirebasePerformance
 import com.google.firebase.remoteconfig.remoteConfig
@@ -114,6 +124,7 @@ import com.google.firebase.remoteconfig.remoteConfigSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -160,8 +171,6 @@ private val UkLocationOptions = listOf(
     "South West",
 )
 
-private const val AccountApiBaseUrl = "http://213.165.91.6:8080"
-
 class MainActivity : ComponentActivity() {
     private var isUnlocked by mutableStateOf(false)
     private var authMessage by mutableStateOf("Unlock Budgie News to continue.")
@@ -169,6 +178,11 @@ class MainActivity : ComponentActivity() {
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private val locationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            updateLocationPreference()
+        }
 
     private val credentialLauncher =
         registerForActivityResult(StartActivityForResult()) { result ->
@@ -184,7 +198,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         BudgieNotifications.ensureChannels(this)
-        BudgieFirebase.setup()
+        BudgieFirebase.setup(this)
         if (!BudgiePrefs.load(this).biometricEnabled) {
             isUnlocked = true
         }
@@ -202,14 +216,53 @@ class MainActivity : ComponentActivity() {
         if (!isUnlocked) {
             window.decorView.post { authenticate() }
         } else {
-            requestNotificationPermissionIfNeeded()
+            requestRequiredPermissionsIfNeeded()
         }
     }
 
+    private fun requestRequiredPermissionsIfNeeded() {
+        requestNotificationPermissionIfNeeded()
+        requestLocationPermissionIfNeeded()
+    }
+
     private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
-        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun requestLocationPermissionIfNeeded() {
+        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (hasCoarse || hasFine) {
+            updateLocationPreference()
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                ),
+            )
+        }
+    }
+
+    private fun updateLocationPreference() {
+        val location = bestLastKnownLocation() ?: return
+        val current = BudgiePrefs.load(this)
+        BudgiePrefs.save(this, current.copy(ukLocation = location.toUkRegion()))
+    }
+
+    private fun bestLastKnownLocation(): Location? {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) return null
+
+        val manager = getSystemService(LocationManager::class.java)
+        return manager.getProviders(true)
+            .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+            .maxByOrNull { it.time }
     }
 
     private fun authenticate() {
@@ -283,15 +336,24 @@ class MainActivity : ComponentActivity() {
     private fun unlockApp() {
         isUnlocked = true
         authMessage = "Unlocked."
-        requestNotificationPermissionIfNeeded()
+        requestRequiredPermissionsIfNeeded()
     }
 }
 
 private object BudgieFirebase {
-    fun setup() {
+    fun setup(context: Context) {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.8-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.9-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                BudgieAccountApi.ensureSession()
+                BudgieAccountApi.startLiveArticles(context)
+                BudgiePrefs.deviceToken(context).takeIf { it.isNotBlank() }?.let { token ->
+                    BudgieAccountApi.registerDevice(context, token)
+                }
+            }.onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+        }
         Firebase.remoteConfig.setConfigSettingsAsync(
             remoteConfigSettings {
                 minimumFetchIntervalInSeconds = 3600
@@ -300,6 +362,16 @@ private object BudgieFirebase {
         Firebase.remoteConfig.fetchAndActivate()
         Firebase.messaging.token.addOnSuccessListener { token ->
             FirebaseCrashlytics.getInstance().setCustomKey("fcm_token_ready", token.isNotBlank())
+            if (token.isNotBlank()) {
+                BudgiePrefs.saveDeviceToken(context, token)
+                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    runCatching {
+                        BudgieAccountApi.ensureSession()
+                        BudgieAccountApi.registerDevice(context, token)
+                    }
+                        .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                }
+            }
         }.addOnFailureListener { error ->
             FirebaseCrashlytics.getInstance().recordException(error)
         }
@@ -372,7 +444,7 @@ private object BudgieNotifications {
     }
 }
 
-private object BudgiePrefs {
+internal object BudgiePrefs {
     private const val PREFS = "budgie_news_settings"
     private const val KEY_BIOMETRIC = "biometric_enabled"
     private const val KEY_BREAKING = "breaking_notifications"
@@ -382,8 +454,10 @@ private object BudgiePrefs {
     private const val KEY_ACCOUNT_ENABLED = "account_enabled"
     private const val KEY_ACCOUNT_NAME = "account_name"
     private const val KEY_ACCOUNT_EMAIL = "account_email"
+    private const val KEY_ACCOUNT_PASSWORD = "account_password"
     private const val KEY_LOCATION = "uk_location"
     private const val KEY_SEND_STATS = "send_stats"
+    private const val KEY_DEVICE_TOKEN = "device_token"
     private const val KEY_LAST_BREAKING = "last_breaking_link"
     private const val KEY_LAST_IMPORTANT = "last_important_link"
 
@@ -398,6 +472,7 @@ private object BudgiePrefs {
             accountEnabled = prefs.getBoolean(KEY_ACCOUNT_ENABLED, false),
             accountName = prefs.getString(KEY_ACCOUNT_NAME, "").orEmpty(),
             accountEmail = prefs.getString(KEY_ACCOUNT_EMAIL, "").orEmpty(),
+            accountPassword = prefs.getString(KEY_ACCOUNT_PASSWORD, "").orEmpty(),
             ukLocation = prefs.getString(KEY_LOCATION, "United Kingdom").orEmpty(),
             sendAppStatistics = prefs.getBoolean(KEY_SEND_STATS, true),
         )
@@ -418,6 +493,16 @@ private object BudgiePrefs {
             .putBoolean(KEY_SEND_STATS, settings.sendAppStatistics)
             .apply()
     }
+
+    fun saveDeviceToken(context: Context, token: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_DEVICE_TOKEN, token)
+            .apply()
+    }
+
+    fun deviceToken(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_DEVICE_TOKEN, "").orEmpty()
 
     suspend fun saveAndSync(context: Context, settings: AppSettings) {
         save(context, settings)
@@ -446,40 +531,114 @@ private object BudgiePrefs {
     }
 }
 
-private object BudgieAccountApi {
-    fun sync(settings: AppSettings) {
-        val body = JSONObject()
-            .put("email", settings.accountEmail)
-            .put("displayName", settings.accountName.ifBlank { "Budgie reader" })
-            .put("ukLocation", settings.ukLocation)
-            .put("defaultSection", settings.defaultSection.name)
-            .put("defaultSource", settings.defaultSource.name)
-            .put("biometricEnabled", settings.biometricEnabled)
-            .put("breakingNotificationsEnabled", settings.breakingNotificationsEnabled)
-            .put("importantNotificationsEnabled", settings.importantNotificationsEnabled)
-            .put("sendAppStatistics", settings.sendAppStatistics)
-            .toString()
+internal object BudgieAccountApi {
+    private var liveArticleRegistration: ListenerRegistration? = null
 
-        val connection = (URL("$AccountApiBaseUrl/v1/account/sync").openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            doOutput = true
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "Budgie News Android")
-        }
-        try {
-            connection.outputStream.use { stream ->
-                stream.write(body.toByteArray(Charsets.UTF_8))
-            }
-            if (connection.responseCode !in 200..299) {
-                error("Account sync returned HTTP ${connection.responseCode}")
-            }
-        } finally {
-            connection.disconnect()
+    suspend fun ensureSession() {
+        if (Firebase.auth.currentUser == null) {
+            Firebase.auth.signInAnonymously().await()
         }
     }
+
+    suspend fun register(settings: AppSettings) {
+        require(settings.accountEmail.isNotBlank()) { "Email is required" }
+        require(settings.accountPassword.length >= 6) { "Password must be at least 6 characters" }
+        val credential = EmailAuthProvider.getCredential(settings.accountEmail, settings.accountPassword)
+        val currentUser = Firebase.auth.currentUser
+        if (currentUser?.isAnonymous == true) {
+            currentUser.linkWithCredential(credential).await()
+        } else {
+            Firebase.auth.createUserWithEmailAndPassword(settings.accountEmail, settings.accountPassword).await()
+        }
+        sync(settings.copy(accountEnabled = true))
+    }
+
+    suspend fun login(settings: AppSettings) {
+        require(settings.accountEmail.isNotBlank()) { "Email is required" }
+        require(settings.accountPassword.isNotBlank()) { "Password is required" }
+        Firebase.auth.signInWithEmailAndPassword(settings.accountEmail, settings.accountPassword).await()
+        sync(settings.copy(accountEnabled = true))
+    }
+
+    suspend fun sync(settings: AppSettings) {
+        val user = Firebase.auth.currentUser ?: return
+        val data = mapOf(
+            "uid" to user.uid,
+            "email" to settings.accountEmail,
+            "displayName" to settings.accountName.ifBlank { "Budgie reader" },
+            "ukLocation" to settings.ukLocation,
+            "defaultSection" to settings.defaultSection.name,
+            "defaultSource" to settings.defaultSource.name,
+            "biometricEnabled" to settings.biometricEnabled,
+            "breakingNotificationsEnabled" to settings.breakingNotificationsEnabled,
+            "importantNotificationsEnabled" to settings.importantNotificationsEnabled,
+            "sendAppStatistics" to settings.sendAppStatistics,
+            "updatedAt" to FieldValue.serverTimestamp(),
+        )
+        Firebase.firestore.collection("users")
+            .document(user.uid)
+            .set(data, SetOptions.merge())
+            .await()
+    }
+
+    suspend fun registerDevice(context: Context, token: String) {
+        if (token.isBlank()) return
+        val settings = BudgiePrefs.load(context)
+        val uid = Firebase.auth.currentUser?.uid
+        val data = mapOf(
+            "token" to token,
+            "uid" to uid,
+            "email" to settings.accountEmail,
+            "ukLocation" to settings.ukLocation,
+            "breakingNotificationsEnabled" to settings.breakingNotificationsEnabled,
+            "importantNotificationsEnabled" to settings.importantNotificationsEnabled,
+            "updatedAt" to FieldValue.serverTimestamp(),
+            "platform" to "android",
+        )
+        Firebase.firestore.collection("deviceTokens")
+            .document(token.safeFirestoreId())
+            .set(data, SetOptions.merge())
+            .await()
+    }
+
+    fun startLiveArticles(context: Context) {
+        if (liveArticleRegistration != null) return
+        val newestAllowed = System.currentTimeMillis() - 86_400_000L
+        liveArticleRegistration = Firebase.firestore.collection("articles")
+            .whereGreaterThanOrEqualTo("publishedAtMillis", newestAllowed)
+            .orderBy("publishedAtMillis", Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    FirebaseCrashlytics.getInstance().recordException(error)
+                    return@addSnapshotListener
+                }
+                val articles = snapshot?.documents
+                    ?.mapNotNull { document ->
+                        val publishedAtMillis = document.getLong("publishedAtMillis") ?: return@mapNotNull null
+                        if (publishedAtMillis < newestAllowed) return@mapNotNull null
+                        LocalArticle(
+                            articleId = document.getString("articleId") ?: document.id,
+                            title = document.getString("title").orEmpty(),
+                            description = document.getString("description").orEmpty(),
+                            link = document.getString("link").orEmpty(),
+                            source = document.getString("source") ?: "Budgie News",
+                            publishedAt = document.getString("publishedAt").orEmpty(),
+                            imageUrl = document.getString("imageUrl")?.takeIf { it.isNotBlank() },
+                            category = document.getString("category") ?: NewsSection.HEADLINES.label,
+                            isRead = document.getBoolean("isRead") == true,
+                        )
+                    }
+                    .orEmpty()
+                    .filter { it.title.isNotBlank() && it.link.isNotBlank() }
+                articles.forEach { article ->
+                    BudgieArticleDatabase.get(context).upsertArticle(article)
+                }
+            }
+    }
+
+    private fun String.safeFirestoreId(): String =
+        replace(Regex("[^A-Za-z0-9_-]"), "_").take(140).ifBlank { "unknown-token" }
 }
 
 private object BudgieCache {
@@ -527,7 +686,7 @@ private object BudgieCache {
     }
 }
 
-private data class FeedItem(
+internal data class FeedItem(
     val title: String,
     val description: String,
     val link: String,
@@ -537,12 +696,12 @@ private data class FeedItem(
     val coverageSources: List<String> = listOf(source),
 )
 
-private data class FeedSource(
+internal data class FeedSource(
     val name: String,
     val url: String,
 )
 
-private data class AppSettings(
+internal data class AppSettings(
     val biometricEnabled: Boolean = true,
     val breakingNotificationsEnabled: Boolean = true,
     val importantNotificationsEnabled: Boolean = true,
@@ -551,11 +710,12 @@ private data class AppSettings(
     val accountEnabled: Boolean = false,
     val accountName: String = "",
     val accountEmail: String = "",
+    val accountPassword: String = "",
     val ukLocation: String = "United Kingdom",
     val sendAppStatistics: Boolean = true,
 )
 
-private enum class SourceFilter(val label: String, val sourceName: String?) {
+internal enum class SourceFilter(val label: String, val sourceName: String?) {
     ALL("All", null),
     BBC("BBC", "BBC UK"),
     SKY("Sky", "Sky News UK"),
@@ -568,7 +728,7 @@ private enum class SourceFilter(val label: String, val sourceName: String?) {
     FT("FT", "Financial Times UK"),
 }
 
-private enum class NewsSection(
+internal enum class NewsSection(
     val label: String,
     val tagline: String,
     val emptyText: String,
@@ -590,7 +750,7 @@ private enum class NewsSection(
     ),
 }
 
-private sealed interface FeedState {
+internal sealed interface FeedState {
     data object Loading : FeedState
     data class Ready(val items: List<FeedItem>) : FeedState
     data class Error(val message: String) : FeedState
@@ -607,6 +767,7 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
     var selectedItem by remember { mutableStateOf<FeedItem?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
+    val articleSignal by ArticleSignals.version.collectAsState()
     val scope = rememberCoroutineScope()
 
     BackHandler(enabled = selectedItem != null || settingsOpen) {
@@ -618,6 +779,10 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
         settings = updated
         scope.launch {
             BudgiePrefs.saveAndSync(context, updated)
+            BudgiePrefs.deviceToken(context).takeIf { it.isNotBlank() }?.let { token ->
+                runCatching { BudgieAccountApi.registerDevice(context, token) }
+                    .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+            }
         }
         onBiometricSettingChanged(updated.biometricEnabled)
     }
@@ -629,7 +794,7 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
         }
     }
 
-    LaunchedEffect(refreshToken, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled) {
+    LaunchedEffect(refreshToken, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled, articleSignal) {
         state = FeedState.Loading
         state = fetchFeeds(context, selectedSection, selectedSource, settings)
     }
@@ -706,6 +871,10 @@ private fun SettingsScreen(
     onSettingsChanged: (AppSettings) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var accountMessage by remember { mutableStateOf("") }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -716,16 +885,16 @@ private fun SettingsScreen(
             SettingsRow(
                 title = "Account",
                 description = if (settings.accountEnabled) {
-                    settings.accountEmail.ifBlank { "Optional Budgie account enabled" }
+                    settings.accountEmail.ifBlank { "Budgie account enabled" }
                 } else {
-                    "Optional account for syncing settings later"
+                    "Register or log in to sync settings and live-news preferences"
                 },
             )
         }
         item {
             SettingsSwitchRow(
-                title = "Use optional account",
-                description = "Account setup is optional and prepared for DB-backed sync.",
+                title = "Use account",
+                description = "Register or log in with Firebase Auth.",
                 checked = settings.accountEnabled,
                 onCheckedChange = { onSettingsChanged(settings.copy(accountEnabled = it)) },
             )
@@ -745,6 +914,49 @@ private fun SettingsScreen(
                     value = settings.accountEmail,
                     placeholder = "name@example.com",
                     onValueChange = { onSettingsChanged(settings.copy(accountEmail = it)) },
+                )
+            }
+            item {
+                SettingsTextField(
+                    title = "Password",
+                    value = settings.accountPassword,
+                    placeholder = "Required for register and login",
+                    onValueChange = { onSettingsChanged(settings.copy(accountPassword = it)) },
+                )
+            }
+            item {
+                SettingsAuthActions(
+                    message = accountMessage,
+                    onRegister = {
+                        accountMessage = "Registering..."
+                        scope.launch(Dispatchers.IO) {
+                            runCatching {
+                                BudgieAccountApi.register(settings)
+                                BudgiePrefs.saveAndSync(context, settings)
+                            }.fold(
+                                onSuccess = { accountMessage = "Account registered and synced." },
+                                onFailure = {
+                                    FirebaseCrashlytics.getInstance().recordException(it)
+                                    accountMessage = "Register failed: ${it.message ?: "unknown error"}"
+                                },
+                            )
+                        }
+                    },
+                    onLogin = {
+                        accountMessage = "Logging in..."
+                        scope.launch(Dispatchers.IO) {
+                            runCatching {
+                                BudgieAccountApi.login(settings)
+                                BudgiePrefs.saveAndSync(context, settings)
+                            }.fold(
+                                onSuccess = { accountMessage = "Logged in and synced." },
+                                onFailure = {
+                                    FirebaseCrashlytics.getInstance().recordException(it)
+                                    accountMessage = "Login failed: ${it.message ?: "unknown error"}"
+                                },
+                            )
+                        }
+                    },
                 )
             }
         }
@@ -933,6 +1145,43 @@ private fun SettingsTextField(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+    }
+}
+
+@Composable
+private fun SettingsAuthActions(
+    message: String,
+    onRegister: () -> Unit,
+    onLogin: () -> Unit,
+) {
+    Column {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onRegister,
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
+                ) {
+                    Text("Register")
+                }
+                Button(
+                    onClick = onLogin,
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceRaised, contentColor = Ink),
+                ) {
+                    Text("Login")
+                }
+            }
+            if (message.isNotBlank()) {
+                TypewriterText(message, color = Muted, fontSize = 13.sp, maxLines = 2)
+            }
         }
         HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
     }
@@ -1448,6 +1697,10 @@ private suspend fun fetchFeeds(
     runCatching {
         val sources = FeedSources
             .filter { sourceFilter.sourceName == null || it.name == sourceFilter.sourceName }
+        val localItems = BudgieArticleDatabase.get(context)
+            .recentArticles()
+            .map { it.toFeedItem() }
+            .filter { sourceFilter.sourceName == null || it.source == sourceFilter.sourceName }
         val loadedItems = sources
             .map { source ->
                 runCatching { fetchFeed(source).take(12) }
@@ -1468,7 +1721,10 @@ private suspend fun fetchFeeds(
             val sourceNames = sources.joinToString { it.name }
             error("No stories loaded from $sourceNames")
         }
-        val filteredItems = availableItems.filterFor(section).take(24)
+        val filteredItems = (localItems + availableItems)
+            .distinctBy { it.link.ifBlank { it.title } }
+            .filterFor(section)
+            .take(24)
             .withCoverageContext()
         filteredItems.firstOrNull()?.let { firstItem ->
             if (BudgiePrefs.shouldNotify(context, section, firstItem, settings)) {
@@ -1485,6 +1741,35 @@ private suspend fun fetchFeeds(
             FeedState.Error(it.message ?: "Unexpected feed error")
         },
     )
+}
+
+private fun LocalArticle.toFeedItem(): FeedItem =
+    FeedItem(
+        title = title,
+        description = description,
+        link = link,
+        source = source,
+        publishedAt = publishedAt,
+        imageUrl = imageUrl,
+        coverageSources = listOf(source),
+    )
+
+private fun Location.toUkRegion(): String {
+    val lat = latitude
+    val lon = longitude
+    return when {
+        lat in 55.0..59.0 && lon in -8.5..-0.5 -> "Scotland"
+        lat in 51.2..53.6 && lon in -5.8..-2.5 -> "Wales"
+        lat in 54.0..55.4 && lon in -8.3..-5.3 -> "Northern Ireland"
+        lat in 51.0..51.8 && lon in -0.8..0.4 -> "London"
+        lat in 53.0..55.0 && lon in -3.8..-1.5 -> "North West"
+        lat in 54.5..55.9 && lon in -2.4..-0.5 -> "North East"
+        lat in 53.3..54.6 && lon in -2.5..0.2 -> "Yorkshire"
+        lat in 52.0..53.4 && lon in -3.2..-0.5 -> "Midlands"
+        lat in 50.6..52.2 && lon in -1.8..1.8 -> "South East"
+        lat in 49.8..52.1 && lon in -6.5..-1.8 -> "South West"
+        else -> "United Kingdom"
+    }
 }
 
 private fun List<List<FeedItem>>.interleaved(): List<FeedItem> {

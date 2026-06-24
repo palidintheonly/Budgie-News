@@ -19,4 +19,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "Budgie News"
 include(":app")
-include(":server")
