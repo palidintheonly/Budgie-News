@@ -42,17 +42,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -72,7 +75,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -95,6 +98,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -138,13 +142,13 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 private val Ink = Color(0xFFF8FAFC)
-private val Paper = Color(0xFF0B0F14)
-private val SurfaceDark = Color(0xFF151B22)
-private val SurfaceRaised = Color(0xFF1D252E)
-private val Muted = Color(0xFFAAB4BF)
-private val Accent = Color(0xFF37C6A3)
-private val AccentSoft = Color(0xFF203A36)
-private val Alert = Color(0xFFFFB86B)
+private val Paper = Color(0xFF09090B)
+private val SurfaceDark = Color(0xFF111113)
+private val SurfaceRaised = Color(0xFF18181B)
+private val Muted = Color(0xFFA1A1AA)
+private val Accent = Color(0xFF3F3F46)
+private val AccentSoft = Color(0xFF27272A)
+private val Alert = Color(0xFFD4D4D8)
 
 private val FeedSources = listOf(
     FeedSource("BBC UK", "https://feeds.bbci.co.uk/news/uk/rss.xml"),
@@ -359,7 +363,7 @@ class MainActivity : ComponentActivity() {
 private object BudgieFirebase {
     fun setup(context: Context) {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.10-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.11-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             runCatching {
@@ -700,7 +704,8 @@ internal object BudgieAccountApi {
 private fun Throwable.userFacingAuthMessage(action: String): String {
     val authCode = (this as? FirebaseAuthException)?.errorCode.orEmpty()
     return when (authCode) {
-        "ERROR_CONFIGURATION_NOT_FOUND" -> "$action failed: Firebase Auth is not enabled for this Firebase project. Enable Email/Password sign-in in Firebase Console."
+        "ERROR_CONFIGURATION_NOT_FOUND" -> "$action failed: Firebase Auth is not initialized for project moneybytes-apk. Enable Authentication, then enable Email/Password sign-in. If Firebase asks for billing, billing must be enabled before Auth can initialize."
+        "ERROR_OPERATION_NOT_ALLOWED" -> "$action failed: Email/Password sign-in is disabled in Firebase Console."
         "ERROR_INVALID_EMAIL" -> "$action failed: enter a valid email address."
         "ERROR_EMAIL_ALREADY_IN_USE" -> "$action failed: email is already registered. Use Login."
         "ERROR_WRONG_PASSWORD", "ERROR_INVALID_CREDENTIAL" -> "$action failed: email or password is wrong."
@@ -935,21 +940,40 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
                 onSettingsChanged = ::saveSettings,
                 modifier = Modifier.padding(padding),
             )
-        } else if (detailItem != null) {
-            StoryDetail(detailItem, modifier = Modifier.padding(padding))
         } else {
-            when (val value = state) {
-                FeedState.Loading -> LoadingNews(Modifier.padding(padding))
-                is FeedState.Error -> ErrorNews(value.message, ::refresh, Modifier.padding(padding))
-                is FeedState.Ready -> NewsList(
-                    items = value.items,
-                    selectedSection = selectedSection,
-                    selectedSource = selectedSource,
-                    onSectionSelected = { selectedSection = it },
-                    onSourceSelected = { selectedSource = it },
-                    onStorySelected = { selectedItem = it },
-                    modifier = Modifier.padding(padding),
-                )
+            BoxWithConstraints(Modifier.padding(padding).fillMaxSize()) {
+                val useTwoPane = maxWidth >= 720.dp
+                if (!useTwoPane && detailItem != null) {
+                    StoryDetail(detailItem)
+                } else {
+                    Row(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(if (useTwoPane && detailItem != null) 0.48f else 1f).fillMaxSize()) {
+                            when (val value = state) {
+                                FeedState.Loading -> LoadingNews()
+                                is FeedState.Error -> ErrorNews(value.message, ::refresh)
+                                is FeedState.Ready -> NewsList(
+                                    items = value.items,
+                                    selectedSection = selectedSection,
+                                    selectedSource = selectedSource,
+                                    selectedItem = detailItem,
+                                    onSectionSelected = { selectedSection = it },
+                                    onSourceSelected = { selectedSource = it },
+                                    onStorySelected = { selectedItem = it },
+                                )
+                            }
+                        }
+                        if (useTwoPane) {
+                            Spacer(Modifier.width(1.dp).fillMaxSize().background(AccentSoft))
+                            Box(Modifier.weight(0.52f).fillMaxSize()) {
+                                if (detailItem != null) {
+                                    StoryDetail(detailItem)
+                                } else {
+                                    DetailPlaceholder()
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -968,7 +992,7 @@ private fun SettingsScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF121016)),
+            .background(Paper),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         item {
@@ -1147,7 +1171,7 @@ private fun SettingsRow(
             TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             TypewriterText(description, color = Muted, fontSize = 18.sp, lineHeight = 25.sp, maxLines = 3)
         }
-        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+        HorizontalDivider(color = Accent, thickness = 1.dp)
     }
 }
 
@@ -1172,7 +1196,7 @@ private fun SettingsSwitchRow(
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
-        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+        HorizontalDivider(color = Accent, thickness = 1.dp)
     }
 }
 
@@ -1209,7 +1233,7 @@ private fun SettingsChoiceRow(
                 }
             }
         }
-        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+        HorizontalDivider(color = Accent, thickness = 1.dp)
     }
 }
 
@@ -1236,7 +1260,7 @@ private fun SettingsTextField(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+        HorizontalDivider(color = Accent, thickness = 1.dp)
     }
 }
 
@@ -1273,7 +1297,7 @@ private fun SettingsAuthActions(
                 TypewriterText(message, color = Muted, fontSize = 13.sp, maxLines = 2)
             }
         }
-        HorizontalDivider(color = Color(0xFF2B2830), thickness = 1.dp)
+        HorizontalDivider(color = Accent, thickness = 1.dp)
     }
 }
 
@@ -1298,13 +1322,46 @@ private fun VersionFooter() {
 
 @Composable
 private fun LoadingNews(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(color = Accent, strokeWidth = 3.dp)
-            Spacer(Modifier.height(16.dp))
-            TypewriterText("Fetching latest headlines", color = Ink, fontWeight = FontWeight.Medium)
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                SkeletonBlock(Modifier.size(44.dp))
+                repeat(3) { SkeletonBlock(Modifier.weight(1f).height(44.dp)) }
+            }
+        }
+        item { SkeletonBlock(Modifier.fillMaxWidth().height(128.dp)) }
+        item { SkeletonBlock(Modifier.fillMaxWidth().aspectRatio(1.7f)) }
+        items(4) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                SkeletonBlock(Modifier.size(92.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SkeletonBlock(Modifier.fillMaxWidth().height(18.dp))
+                    SkeletonBlock(Modifier.fillMaxWidth(0.76f).height(18.dp))
+                    SkeletonBlock(Modifier.fillMaxWidth(0.52f).height(14.dp))
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun SkeletonBlock(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "skeleton")
+    val shimmer by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(1100), repeatMode = RepeatMode.Restart),
+        label = "skeleton_shimmer",
+    )
+    Box(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (shimmer < 0.5f) SurfaceDark else SurfaceRaised),
+    )
 }
 
 @Composable
@@ -1364,8 +1421,16 @@ private fun LockedApp(message: String, onUnlock: () -> Unit) {
 @Composable
 private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Alert, modifier = Modifier.size(42.dp))
+        Card(
+            shape = RoundedCornerShape(6.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+            border = BorderStroke(1.dp, AccentSoft),
+        ) {
+        Column(
+            Modifier.padding(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Alert, modifier = Modifier.size(40.dp))
             Spacer(Modifier.height(14.dp))
             TypewriterText("Could not load the feed", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Spacer(Modifier.height(8.dp))
@@ -1379,6 +1444,7 @@ private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier =
                 Text("Try again")
             }
         }
+        }
     }
 }
 
@@ -1387,6 +1453,7 @@ private fun NewsList(
     items: List<FeedItem>,
     selectedSection: NewsSection,
     selectedSource: SourceFilter,
+    selectedItem: FeedItem?,
     onSectionSelected: (NewsSection) -> Unit,
     onSourceSelected: (SourceFilter) -> Unit,
     onStorySelected: (FeedItem) -> Unit,
@@ -1420,7 +1487,7 @@ private fun NewsList(
                 LeadStory(items.firstOrNull(), selectedSection, onStorySelected)
             }
             items(items.drop(1)) { item ->
-                StoryCard(item, onStorySelected)
+                StoryCard(item, selected = item.id == selectedItem?.id, onStorySelected)
             }
         }
     }
@@ -1497,7 +1564,7 @@ private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter
     val visibleSources = items.map { it.source }.distinct().sorted()
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
         border = BorderStroke(1.dp, AccentSoft),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -1549,7 +1616,7 @@ private fun MetricTile(label: String, value: String, modifier: Modifier = Modifi
 private fun EmptySection(section: NewsSection) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
         border = BorderStroke(1.dp, AccentSoft),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -1575,13 +1642,13 @@ private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (F
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onStorySelected(item) },
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(6.dp),
             colors = CardDefaults.cardColors(containerColor = SurfaceRaised),
             border = BorderStroke(1.dp, AccentSoft),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column {
-                RemoteImage(item.imageUrl, Modifier.fillMaxWidth().height(190.dp))
+                RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.72f))
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TypewriterText("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     TypewriterText(item.title, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp, maxLines = 4)
@@ -1597,7 +1664,7 @@ private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (F
 }
 
 @Composable
-private fun StoryCard(item: FeedItem, onStorySelected: (FeedItem) -> Unit) {
+private fun StoryCard(item: FeedItem, selected: Boolean, onStorySelected: (FeedItem) -> Unit) {
     var visible by remember(item.link) { mutableStateOf(false) }
     LaunchedEffect(item.link) { visible = true }
     AnimatedVisibility(
@@ -1608,13 +1675,13 @@ private fun StoryCard(item: FeedItem, onStorySelected: (FeedItem) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onStorySelected(item) },
-            shape = RoundedCornerShape(8.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-            border = BorderStroke(1.dp, Color(0xFF26313B)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            shape = RoundedCornerShape(6.dp),
+            colors = CardDefaults.cardColors(containerColor = if (selected) SurfaceRaised else SurfaceDark),
+            border = BorderStroke(1.dp, if (selected) Ink else Accent),
+            elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 2.dp else 0.dp),
         ) {
             Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                RemoteImage(item.imageUrl, Modifier.size(92.dp))
+                RemoteImage(item.imageUrl, Modifier.size(92.dp).clip(RoundedCornerShape(6.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     TypewriterText(item.title, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 3, lineHeight = 20.sp)
                     if (item.description.isNotBlank()) {
@@ -1638,12 +1705,12 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            RemoteImage(item.imageUrl, Modifier.fillMaxWidth().height(220.dp))
+            RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.78f))
         }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(6.dp),
                 colors = CardDefaults.cardColors(containerColor = SurfaceDark),
                 border = BorderStroke(1.dp, AccentSoft),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -1667,6 +1734,32 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
                         Text("Read official source")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailPlaceholder() {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .padding(18.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Card(
+            shape = RoundedCornerShape(6.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+            border = BorderStroke(1.dp, AccentSoft),
+        ) {
+            Column(
+                Modifier.padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(36.dp))
+                TypewriterText("Select a story", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                TypewriterText("Article details will stay open beside the feed on larger screens.", color = Muted, lineHeight = 20.sp, maxLines = 3)
             }
         }
     }
@@ -1744,7 +1837,12 @@ private fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
         animationSpec = infiniteRepeatable(animation = tween(900), repeatMode = RepeatMode.Reverse),
         label = "imagePlaceholderAlpha",
     )
-    Box(modifier.background(AccentSoft, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(AccentSoft),
+        contentAlignment = Alignment.Center,
+    ) {
         Icon(
             Icons.AutoMirrored.Rounded.Article,
             contentDescription = null,
@@ -1766,7 +1864,7 @@ private fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
 private fun BudgieMark() {
     Surface(
         modifier = Modifier.size(36.dp),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp),
         color = SurfaceRaised,
         border = BorderStroke(1.dp, AccentSoft),
     ) {
@@ -2113,7 +2211,7 @@ private fun Context.appVersionText(): String {
 @Composable
 private fun BudgieNewsTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = androidx.compose.material3.darkColorScheme(
+        colorScheme = darkColorScheme(
             primary = Accent,
             onPrimary = Paper,
             background = Paper,
@@ -2154,6 +2252,7 @@ private fun NewsPreview() {
             ),
             selectedSection = NewsSection.HEADLINES,
             selectedSource = SourceFilter.ALL,
+            selectedItem = null,
             onSectionSelected = {},
             onSourceSelected = {},
             onStorySelected = {},

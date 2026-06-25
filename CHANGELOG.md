@@ -1,9 +1,9 @@
 # Changelog
 
-## 0.0.10-alpha
+## 0.0.11-alpha
 
-- Fixed Breaking and Important system notifications so FCM data pushes show notifications outside the app.
-- Fixed notification taps so they open the sent article in Budgie News.
-- Removed category-switch notification triggers from the in-app feed.
-- Added Firebase Auth-specific register/login error messages.
-- Added anonymous-account linking fallback for existing email/password accounts.
+- Applied strict minimalist dark branding with pitch-black background, off-white text, zinc borders, and 6px radius.
+- Kept the adaptive two-pane feed and article detail layout for wider screens.
+- Kept skeleton loading cards with flat, solid surfaces.
+- Refined story cards with selected state, stable image aspect ratios, and polished placeholders.
+- Added a large-screen article detail placeholder.
