@@ -42,6 +42,7 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
     data: {
       articleId,
       category,
+      title: String(article.title || `${category} story`).slice(0, 180),
       source: article.source || "Budgie News"
     },
     android: {

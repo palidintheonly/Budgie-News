@@ -22,9 +22,21 @@ internal data class LocalArticle(
 internal object ArticleSignals {
     private val _version = MutableStateFlow(0L)
     val version = _version.asStateFlow()
+    private val _openArticleId = MutableStateFlow<String?>(null)
+    val openArticleId = _openArticleId.asStateFlow()
 
     fun changed() {
         _version.value = _version.value + 1
+    }
+
+    fun open(articleId: String) {
+        _openArticleId.value = articleId
+    }
+
+    fun clearOpenRequest(articleId: String) {
+        if (_openArticleId.value == articleId) {
+            _openArticleId.value = null
+        }
     }
 }
 
@@ -117,6 +129,33 @@ internal class BudgieArticleDatabase private constructor(context: Context) :
                 )
             }
             return result
+        }
+    }
+
+    fun articleById(articleId: String): LocalArticle? {
+        val rows = readableDatabase.query(
+            "articles",
+            arrayOf("article_id", "title", "description", "link", "source", "published_at", "image_url", "category", "is_read"),
+            "article_id = ?",
+            arrayOf(articleId),
+            null,
+            null,
+            null,
+            "1",
+        )
+        rows.use { cursor ->
+            if (!cursor.moveToFirst()) return null
+            return LocalArticle(
+                articleId = cursor.getString(0),
+                title = cursor.getString(1),
+                description = cursor.getString(2),
+                link = cursor.getString(3),
+                source = cursor.getString(4),
+                publishedAt = cursor.getString(5),
+                imageUrl = cursor.getString(6),
+                category = cursor.getString(7),
+                isRead = cursor.getInt(8) == 1,
+            )
         }
     }
 

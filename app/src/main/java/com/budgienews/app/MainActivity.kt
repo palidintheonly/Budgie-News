@@ -110,6 +110,8 @@ import coil3.compose.AsyncImage
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.analytics
 import com.google.firebase.auth.EmailAuthProvider
+import com.google.firebase.auth.FirebaseAuthException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.auth
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.firestore.FieldValue
@@ -198,6 +200,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         BudgieNotifications.ensureChannels(this)
+        handleArticleIntent(intent)
         BudgieFirebase.setup(this)
         if (!BudgiePrefs.load(this).biometricEnabled) {
             isUnlocked = true
@@ -217,6 +220,19 @@ class MainActivity : ComponentActivity() {
             window.decorView.post { authenticate() }
         } else {
             requestRequiredPermissionsIfNeeded()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleArticleIntent(intent)
+    }
+
+    private fun handleArticleIntent(intent: Intent?) {
+        val articleId = intent?.getStringExtra(BudgieNotifications.EXTRA_ARTICLE_ID).orEmpty()
+        if (articleId.isNotBlank()) {
+            ArticleSignals.open(articleId)
         }
     }
 
@@ -343,7 +359,7 @@ class MainActivity : ComponentActivity() {
 private object BudgieFirebase {
     fun setup(context: Context) {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.9-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.10-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             runCatching {
@@ -378,7 +394,7 @@ private object BudgieFirebase {
     }
 }
 
-private object BudgieNotifications {
+internal object BudgieNotifications {
     const val BREAKING_CHANNEL_ID = "budgie_news_breaking"
     const val IMPORTANT_CHANNEL_ID = "budgie_news_important"
 
@@ -411,7 +427,10 @@ private object BudgieNotifications {
         )
     }
 
-    fun notifyFor(context: Context, section: NewsSection, item: FeedItem) {
+    const val EXTRA_ARTICLE_ID = "com.budgienews.app.extra.ARTICLE_ID"
+    const val EXTRA_ARTICLE_CATEGORY = "com.budgienews.app.extra.ARTICLE_CATEGORY"
+
+    fun notifyFor(context: Context, section: NewsSection, item: FeedItem, articleId: String = item.link) {
         if (section == NewsSection.HEADLINES) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -422,10 +441,14 @@ private object BudgieNotifications {
             NewsSection.IMPORTANT -> IMPORTANT_CHANNEL_ID
             NewsSection.HEADLINES -> return
         }
-        val intent = Intent(context, MainActivity::class.java)
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_ARTICLE_ID, articleId)
+            putExtra(EXTRA_ARTICLE_CATEGORY, section.label)
+        }
         val pendingIntent = PendingIntent.getActivity(
             context,
-            section.ordinal,
+            articleId.hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -441,6 +464,31 @@ private object BudgieNotifications {
 
         context.getSystemService(NotificationManager::class.java)
             .notify(section.ordinal + item.link.hashCode(), notification)
+    }
+
+    fun notifyForPush(
+        context: Context,
+        articleId: String,
+        category: String,
+        title: String,
+        source: String,
+    ) {
+        val section = runCatching { NewsSection.valueOf(category.uppercase()) }.getOrDefault(NewsSection.HEADLINES)
+        if (section == NewsSection.HEADLINES) return
+        notifyFor(
+            context = context,
+            section = section,
+            item = FeedItem(
+                id = articleId,
+                title = title.ifBlank { "${section.label} story" },
+                description = "",
+                link = articleId,
+                source = source.ifBlank { "Budgie News" },
+                publishedAt = "",
+                imageUrl = null,
+            ),
+            articleId = articleId,
+        )
     }
 }
 
@@ -546,7 +594,15 @@ internal object BudgieAccountApi {
         val credential = EmailAuthProvider.getCredential(settings.accountEmail, settings.accountPassword)
         val currentUser = Firebase.auth.currentUser
         if (currentUser?.isAnonymous == true) {
-            currentUser.linkWithCredential(credential).await()
+            runCatching {
+                currentUser.linkWithCredential(credential).await()
+            }.recoverCatching { error ->
+                if (error is FirebaseAuthUserCollisionException) {
+                    Firebase.auth.signInWithEmailAndPassword(settings.accountEmail, settings.accountPassword).await()
+                } else {
+                    throw error
+                }
+            }.getOrThrow()
         } else {
             Firebase.auth.createUserWithEmailAndPassword(settings.accountEmail, settings.accountPassword).await()
         }
@@ -641,6 +697,19 @@ internal object BudgieAccountApi {
         replace(Regex("[^A-Za-z0-9_-]"), "_").take(140).ifBlank { "unknown-token" }
 }
 
+private fun Throwable.userFacingAuthMessage(action: String): String {
+    val authCode = (this as? FirebaseAuthException)?.errorCode.orEmpty()
+    return when (authCode) {
+        "ERROR_CONFIGURATION_NOT_FOUND" -> "$action failed: Firebase Auth is not enabled for this Firebase project. Enable Email/Password sign-in in Firebase Console."
+        "ERROR_INVALID_EMAIL" -> "$action failed: enter a valid email address."
+        "ERROR_EMAIL_ALREADY_IN_USE" -> "$action failed: email is already registered. Use Login."
+        "ERROR_WRONG_PASSWORD", "ERROR_INVALID_CREDENTIAL" -> "$action failed: email or password is wrong."
+        "ERROR_USER_NOT_FOUND" -> "$action failed: no account exists for that email."
+        "ERROR_WEAK_PASSWORD" -> "$action failed: password must be at least 6 characters."
+        else -> "$action failed: ${message ?: "unknown Firebase Auth error"}"
+    }
+}
+
 private object BudgieCache {
     private const val PREFS = "budgie_news_cache"
     private const val KEY_ITEMS = "items"
@@ -650,6 +719,7 @@ private object BudgieCache {
         items.take(80).forEach { item ->
             array.put(
                 JSONObject()
+                    .put("id", item.id)
                     .put("title", item.title)
                     .put("description", item.description)
                     .put("link", item.link)
@@ -671,6 +741,7 @@ private object BudgieCache {
             List(array.length()) { index ->
                 val item = array.getJSONObject(index)
                 FeedItem(
+                    id = item.optString("id").ifBlank { item.optString("link") },
                     title = item.optString("title"),
                     description = item.optString("description"),
                     link = item.optString("link"),
@@ -687,6 +758,7 @@ private object BudgieCache {
 }
 
 internal data class FeedItem(
+    val id: String,
     val title: String,
     val description: String,
     val link: String,
@@ -768,6 +840,7 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
     var settingsOpen by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     val articleSignal by ArticleSignals.version.collectAsState()
+    val openArticleId by ArticleSignals.openArticleId.collectAsState()
     val scope = rememberCoroutineScope()
 
     BackHandler(enabled = selectedItem != null || settingsOpen) {
@@ -797,6 +870,23 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
     LaunchedEffect(refreshToken, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled, articleSignal) {
         state = FeedState.Loading
         state = fetchFeeds(context, selectedSection, selectedSource, settings)
+    }
+
+    LaunchedEffect(openArticleId, state) {
+        val articleId = openArticleId ?: return@LaunchedEffect
+        val feedItem = when (val value = state) {
+            is FeedState.Ready -> value.items.firstOrNull { item ->
+                item.id == articleId || item.link == articleId
+            }
+            else -> null
+        } ?: withContext(Dispatchers.IO) {
+            BudgieArticleDatabase.get(context).articleById(articleId)?.toFeedItem()
+        }
+        if (feedItem != null) {
+            selectedItem = feedItem
+            settingsOpen = false
+            ArticleSignals.clearOpenRequest(articleId)
+        }
     }
 
     Scaffold(
@@ -937,7 +1027,7 @@ private fun SettingsScreen(
                                 onSuccess = { accountMessage = "Account registered and synced." },
                                 onFailure = {
                                     FirebaseCrashlytics.getInstance().recordException(it)
-                                    accountMessage = "Register failed: ${it.message ?: "unknown error"}"
+                                    accountMessage = it.userFacingAuthMessage("Register")
                                 },
                             )
                         }
@@ -952,7 +1042,7 @@ private fun SettingsScreen(
                                 onSuccess = { accountMessage = "Logged in and synced." },
                                 onFailure = {
                                     FirebaseCrashlytics.getInstance().recordException(it)
-                                    accountMessage = "Login failed: ${it.message ?: "unknown error"}"
+                                    accountMessage = it.userFacingAuthMessage("Login")
                                 },
                             )
                         }
@@ -1726,11 +1816,6 @@ private suspend fun fetchFeeds(
             .filterFor(section)
             .take(24)
             .withCoverageContext()
-        filteredItems.firstOrNull()?.let { firstItem ->
-            if (BudgiePrefs.shouldNotify(context, section, firstItem, settings)) {
-                BudgieNotifications.notifyFor(context, section, firstItem)
-            }
-        }
         filteredItems
     }.fold(
         onSuccess = { items ->
@@ -1745,6 +1830,7 @@ private suspend fun fetchFeeds(
 
 private fun LocalArticle.toFeedItem(): FeedItem =
     FeedItem(
+        id = articleId,
         title = title,
         description = description,
         link = link,
@@ -1868,6 +1954,7 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
     }
 
     return FeedItem(
+        id = link.ifBlank { title },
         title = title.stripHtml().ifBlank { "Untitled story" },
         description = description,
         link = link,
@@ -2045,6 +2132,7 @@ private fun NewsPreview() {
         NewsList(
             listOf(
                 FeedItem(
+                    id = "preview-bbc",
                     title = "Markets and politics drive a busy morning briefing",
                     description = "A compact summary of the biggest stories available from the test RSS feed.",
                     link = "https://www.bbc.co.uk/news/uk",
@@ -2054,6 +2142,7 @@ private fun NewsPreview() {
                     coverageSources = listOf("BBC UK", "Sky News UK"),
                 ),
                 FeedItem(
+                    id = "preview-sky",
                     title = "UK leaders respond as major policy announcements continue",
                     description = "Latest updates are displayed in a scrollable modern news feed.",
                     link = "https://news.sky.com/uk",

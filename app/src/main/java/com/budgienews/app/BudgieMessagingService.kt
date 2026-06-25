@@ -13,11 +13,20 @@ class BudgieMessagingService : FirebaseMessagingService() {
         if (articleId.isBlank()) return
 
         val category = message.data["category"].orEmpty().ifBlank { "Headlines" }
+        val title = message.data["title"].orEmpty().ifBlank { "New ${category.lowercase()} story" }
+        val source = message.data["source"].orEmpty().ifBlank { "Budgie News" }
         FirebaseCrashlytics.getInstance().setCustomKey("last_push_article_id", articleId)
         ArticleSyncWorker.enqueue(
             context = applicationContext,
             articleId = articleId,
             category = category,
+        )
+        BudgieNotifications.notifyForPush(
+            context = applicationContext,
+            articleId = articleId,
+            category = category,
+            title = title,
+            source = source,
         )
     }
 
