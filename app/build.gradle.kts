@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.budgienews.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.budgienews.app"
-        minSdk = 26
-        targetSdk = 36
+        minSdk = 27
+        targetSdk = 37
         versionCode = 1
         versionName = "0.0.12-alpha"
     }
@@ -29,24 +29,24 @@ android {
 }
 
 dependencies {
-    implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
-    implementation("com.google.firebase:firebase-analytics")
-    implementation("com.google.firebase:firebase-crashlytics")
-    implementation("com.google.firebase:firebase-perf")
-    implementation("com.google.firebase:firebase-config")
-    implementation("com.google.firebase:firebase-messaging")
-    implementation("com.google.firebase:firebase-auth")
-    implementation("com.google.firebase:firebase-firestore")
-    implementation("com.google.firebase:firebase-inappmessaging-display")
-    implementation("com.google.firebase:firebase-appcheck-playintegrity")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
-    implementation("io.coil-kt.coil3:coil-compose:3.4.0")
-    implementation("io.coil-kt.coil3:coil-network-okhttp:3.4.0")
-    implementation("androidx.compose.animation:animation")
-    implementation("androidx.work:work-runtime-ktx:2.11.0")
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.firebase.perf)
+    implementation(libs.firebase.config)
+    implementation(libs.firebase.messaging)
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.inappmessaging.display)
+    implementation(libs.firebase.appcheck.playintegrity)
+    implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
+    implementation(libs.androidx.compose.animation)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
-    implementation("androidx.core:core-ktx:1.17.0")
+    implementation(libs.androidx.core.ktx)
     implementation(libs.compose.material3)
     implementation(libs.compose.material)
     implementation(libs.compose.ui)
