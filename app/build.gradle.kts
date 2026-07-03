@@ -14,7 +14,7 @@ android {
         minSdk = 27
         targetSdk = 36
         versionCode = 1
-        versionName = "0.0.12-alpha"
+        versionName = "0.0.13-alpha"
     }
 
     buildFeatures {
@@ -37,7 +37,7 @@ dependencies {
     implementation(libs.firebase.messaging)
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
-    implementation(libs.firebase.inappmessaging.display)
+
     implementation(libs.firebase.appcheck.playintegrity)
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.coil.compose)

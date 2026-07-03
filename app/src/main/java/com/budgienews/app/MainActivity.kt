@@ -366,7 +366,7 @@ class MainActivity : ComponentActivity() {
 private object BudgieFirebase {
     fun setup(context: Context) {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.12-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.13-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             runCatching {
@@ -839,7 +839,7 @@ internal enum class NewsSection(
 ) {
     HEADLINES(
         "Headlines",
-        "Curated GB headlines",
+        "The latest top stories from across the UK",
         "No headlines were found in the selected feeds.",
     ),
     BREAKING(
@@ -2199,7 +2199,7 @@ private fun SourceFilter.tagline(section: NewsSection): String = when (this) {
 }
 
 private fun SourceFilter.sourceNote(): String = when (this) {
-    SourceFilter.ALL -> "Using ${FeedSources.size} curated UK/GB feeds"
+    SourceFilter.ALL -> "Reporting from ${FeedSources.size} leading UK newsrooms"
     else -> "Showing $label stories only"
 }
 
