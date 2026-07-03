@@ -234,7 +234,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleArticleIntent(intent: Intent?) {
-        val articleId = intent?.getStringExtra(BudgieNotifications.EXTRA_ARTICLE_ID).orEmpty()
+        val articleId = (
+            intent?.getStringExtra(BudgieNotifications.EXTRA_ARTICLE_ID)
+                ?: intent?.getStringExtra("articleId")
+            ).orEmpty()
         if (articleId.isNotBlank()) {
             ArticleSignals.open(articleId)
         }
@@ -363,7 +366,7 @@ class MainActivity : ComponentActivity() {
 private object BudgieFirebase {
     fun setup(context: Context) {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.11-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.12-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             runCatching {
@@ -401,6 +404,7 @@ private object BudgieFirebase {
 internal object BudgieNotifications {
     const val BREAKING_CHANNEL_ID = "budgie_news_breaking"
     const val IMPORTANT_CHANNEL_ID = "budgie_news_important"
+    const val HEADLINES_CHANNEL_ID = "budgie_news_headlines"
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -427,6 +431,14 @@ internal object BudgieNotifications {
                     description = "Important Budgie News alerts"
                     setSound(Settings.System.DEFAULT_ALARM_ALERT_URI, audioAttributes)
                 },
+                NotificationChannel(
+                    HEADLINES_CHANNEL_ID,
+                    "Headlines",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Regular Budgie News alerts"
+                    setSound(null, null)
+                },
             ),
         )
     }
@@ -435,7 +447,6 @@ internal object BudgieNotifications {
     const val EXTRA_ARTICLE_CATEGORY = "com.budgienews.app.extra.ARTICLE_CATEGORY"
 
     fun notifyFor(context: Context, section: NewsSection, item: FeedItem, articleId: String = item.link) {
-        if (section == NewsSection.HEADLINES) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -443,7 +454,7 @@ internal object BudgieNotifications {
         val channelId = when (section) {
             NewsSection.BREAKING -> BREAKING_CHANNEL_ID
             NewsSection.IMPORTANT -> IMPORTANT_CHANNEL_ID
-            NewsSection.HEADLINES -> return
+            NewsSection.HEADLINES -> HEADLINES_CHANNEL_ID
         }
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -478,7 +489,6 @@ internal object BudgieNotifications {
         source: String,
     ) {
         val section = runCatching { NewsSection.valueOf(category.uppercase()) }.getOrDefault(NewsSection.HEADLINES)
-        if (section == NewsSection.HEADLINES) return
         notifyFor(
             context = context,
             section = section,
@@ -501,6 +511,7 @@ internal object BudgiePrefs {
     private const val KEY_BIOMETRIC = "biometric_enabled"
     private const val KEY_BREAKING = "breaking_notifications"
     private const val KEY_IMPORTANT = "important_notifications"
+    private const val KEY_HEADLINES = "headlines_notifications"
     private const val KEY_SECTION = "default_section"
     private const val KEY_SOURCE = "default_source"
     private const val KEY_ACCOUNT_ENABLED = "account_enabled"
@@ -519,6 +530,7 @@ internal object BudgiePrefs {
             biometricEnabled = prefs.getBoolean(KEY_BIOMETRIC, true),
             breakingNotificationsEnabled = prefs.getBoolean(KEY_BREAKING, true),
             importantNotificationsEnabled = prefs.getBoolean(KEY_IMPORTANT, true),
+            headlinesNotificationsEnabled = prefs.getBoolean(KEY_HEADLINES, true),
             defaultSection = prefs.getString(KEY_SECTION, null)?.let { runCatching { NewsSection.valueOf(it) }.getOrNull() } ?: NewsSection.HEADLINES,
             defaultSource = prefs.getString(KEY_SOURCE, null)?.let { runCatching { SourceFilter.valueOf(it) }.getOrNull() } ?: SourceFilter.ALL,
             accountEnabled = prefs.getBoolean(KEY_ACCOUNT_ENABLED, false),
@@ -536,6 +548,7 @@ internal object BudgiePrefs {
             .putBoolean(KEY_BIOMETRIC, settings.biometricEnabled)
             .putBoolean(KEY_BREAKING, settings.breakingNotificationsEnabled)
             .putBoolean(KEY_IMPORTANT, settings.importantNotificationsEnabled)
+            .putBoolean(KEY_HEADLINES, settings.headlinesNotificationsEnabled)
             .putString(KEY_SECTION, settings.defaultSection.name)
             .putString(KEY_SOURCE, settings.defaultSource.name)
             .putBoolean(KEY_ACCOUNT_ENABLED, settings.accountEnabled)
@@ -572,10 +585,14 @@ internal object BudgiePrefs {
         val enabled = when (section) {
             NewsSection.BREAKING -> settings.breakingNotificationsEnabled
             NewsSection.IMPORTANT -> settings.importantNotificationsEnabled
-            NewsSection.HEADLINES -> false
+            NewsSection.HEADLINES -> settings.headlinesNotificationsEnabled
         }
         if (!enabled || item.link.isBlank()) return false
-        val key = if (section == NewsSection.BREAKING) KEY_LAST_BREAKING else KEY_LAST_IMPORTANT
+        val key = when (section) {
+            NewsSection.BREAKING -> KEY_LAST_BREAKING
+            NewsSection.IMPORTANT -> KEY_LAST_IMPORTANT
+            NewsSection.HEADLINES -> "last_headlines_link"
+        }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (prefs.getString(key, "") == item.link) return false
         prefs.edit().putString(key, item.link).apply()
@@ -632,6 +649,7 @@ internal object BudgieAccountApi {
             "biometricEnabled" to settings.biometricEnabled,
             "breakingNotificationsEnabled" to settings.breakingNotificationsEnabled,
             "importantNotificationsEnabled" to settings.importantNotificationsEnabled,
+            "headlinesNotificationsEnabled" to settings.headlinesNotificationsEnabled,
             "sendAppStatistics" to settings.sendAppStatistics,
             "updatedAt" to FieldValue.serverTimestamp(),
         )
@@ -643,8 +661,9 @@ internal object BudgieAccountApi {
 
     suspend fun registerDevice(context: Context, token: String) {
         if (token.isBlank()) return
+        ensureSession()
         val settings = BudgiePrefs.load(context)
-        val uid = Firebase.auth.currentUser?.uid
+        val uid = Firebase.auth.currentUser?.uid ?: return
         val data = mapOf(
             "token" to token,
             "uid" to uid,
@@ -652,6 +671,7 @@ internal object BudgieAccountApi {
             "ukLocation" to settings.ukLocation,
             "breakingNotificationsEnabled" to settings.breakingNotificationsEnabled,
             "importantNotificationsEnabled" to settings.importantNotificationsEnabled,
+            "headlinesNotificationsEnabled" to settings.headlinesNotificationsEnabled,
             "updatedAt" to FieldValue.serverTimestamp(),
             "platform" to "android",
         )
@@ -691,8 +711,14 @@ internal object BudgieAccountApi {
                     }
                     .orEmpty()
                     .filter { it.title.isNotBlank() && it.link.isNotBlank() }
+                val settings = BudgiePrefs.load(context)
                 articles.forEach { article ->
                     BudgieArticleDatabase.get(context).upsertArticle(article)
+                    val section = article.category.toNewsSection() ?: return@forEach
+                    val item = article.toFeedItem()
+                    if (BudgiePrefs.shouldNotify(context, section, item, settings)) {
+                        BudgieNotifications.notifyFor(context, section, item, articleId = article.articleId)
+                    }
                 }
             }
     }
@@ -782,6 +808,7 @@ internal data class AppSettings(
     val biometricEnabled: Boolean = true,
     val breakingNotificationsEnabled: Boolean = true,
     val importantNotificationsEnabled: Boolean = true,
+    val headlinesNotificationsEnabled: Boolean = true,
     val defaultSection: NewsSection = NewsSection.HEADLINES,
     val defaultSource: SourceFilter = SourceFilter.ALL,
     val accountEnabled: Boolean = false,
@@ -1120,6 +1147,14 @@ private fun SettingsScreen(
                 description = "Notify only when the Important feed finds a new story.",
                 checked = settings.importantNotificationsEnabled,
                 onCheckedChange = { onSettingsChanged(settings.copy(importantNotificationsEnabled = it)) },
+            )
+        }
+        item {
+            SettingsSwitchRow(
+                title = "Headlines alerts",
+                description = "Notify when the Headlines feed finds a new story.",
+                checked = settings.headlinesNotificationsEnabled,
+                onCheckedChange = { onSettingsChanged(settings.copy(headlinesNotificationsEnabled = it)) },
             )
         }
         item {
@@ -1804,18 +1839,30 @@ private fun CoverageRow(item: FeedItem) {
 
 @Composable
 private fun SourcePill(label: String, active: Boolean) {
+    val (bgColor, textColor) = if (active) brandColors(label) else AccentSoft to Muted
     Text(
         label,
-        color = if (active) Paper else Muted,
+        color = textColor,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .widthIn(max = 92.dp)
-            .background(if (active) Accent else AccentSoft, RoundedCornerShape(6.dp))
+            .background(bgColor, RoundedCornerShape(6.dp))
             .padding(horizontal = 7.dp, vertical = 4.dp),
     )
+}
+
+private fun brandColors(label: String): Pair<Color, Color> = when {
+    label.contains("BBC", ignoreCase = true) -> Color(0xFFB80000) to Ink
+    label.contains("Sky", ignoreCase = true) -> Color(0xFF0015A8) to Ink
+    label.contains("Guard", ignoreCase = true) -> Color(0xFF052962) to Ink
+    label.contains("Indy", ignoreCase = true) -> Color(0xFFE31B22) to Ink
+    label.contains("Mail", ignoreCase = true) -> Color(0xFF004D99) to Ink
+    label.contains("Sun", ignoreCase = true) -> Color(0xFFED1C24) to Ink
+    label.contains("FT", ignoreCase = true) -> Color(0xFFF3D5B9) to Paper
+    else -> Accent to Ink
 }
 
 @Composable
@@ -1876,6 +1923,43 @@ private fun BudgieMark() {
     }
 }
 
+internal suspend fun loadAllFeedItems(context: Context): List<FeedItem> = withContext(Dispatchers.IO) {
+    val loadedItems = FeedSources
+        .map { source ->
+            runCatching { fetchFeed(source).take(12) }
+                .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                .getOrDefault(emptyList())
+        }
+        .interleaved()
+        .distinctBy { it.link.ifBlank { it.title } }
+    if (loadedItems.isNotEmpty()) {
+        BudgieCache.save(context, loadedItems)
+        loadedItems
+    } else {
+        BudgieCache.load(context).distinctBy { it.link.ifBlank { it.title } }
+    }
+}
+
+internal fun notifyForNewFeedStories(
+    context: Context,
+    items: List<FeedItem>,
+    settings: AppSettings = BudgiePrefs.load(context),
+) {
+    listOf(NewsSection.BREAKING, NewsSection.IMPORTANT).forEach { section ->
+        items.filterFor(section).firstOrNull()?.let { item ->
+            if (BudgiePrefs.shouldNotify(context, section, item, settings)) {
+                BudgieNotifications.notifyFor(context, section, item)
+            }
+        }
+    }
+}
+
+private fun String.toNewsSection(): NewsSection? = when (lowercase()) {
+    "breaking" -> NewsSection.BREAKING
+    "important" -> NewsSection.IMPORTANT
+    else -> null
+}
+
 private suspend fun fetchFeeds(
     context: Context,
     section: NewsSection,
@@ -1909,8 +1993,9 @@ private suspend fun fetchFeeds(
             val sourceNames = sources.joinToString { it.name }
             error("No stories loaded from $sourceNames")
         }
-        val filteredItems = (localItems + availableItems)
-            .distinctBy { it.link.ifBlank { it.title } }
+        val allItems = (localItems + availableItems).distinctBy { it.link.ifBlank { it.title } }
+        notifyForNewFeedStories(context, allItems, settings)
+        val filteredItems = allItems
             .filterFor(section)
             .take(24)
             .withCoverageContext()
@@ -2152,9 +2237,16 @@ private val StoryStopWords = setOf(
 )
 
 private fun XmlPullParser.readText(): String {
-    if (next() != XmlPullParser.TEXT) return ""
-    val result = text.orEmpty()
-    nextTag()
+    var result = ""
+    var depth = 1
+    while (depth > 0) {
+        when (next()) {
+            XmlPullParser.END_TAG -> depth--
+            XmlPullParser.START_TAG -> depth++
+            XmlPullParser.TEXT, XmlPullParser.CDSECT -> if (depth == 1) result += text.orEmpty()
+            XmlPullParser.END_DOCUMENT -> return result.trim()
+        }
+    }
     return result.trim()
 }
 
@@ -2165,6 +2257,7 @@ private fun XmlPullParser.skipTag() {
         when (next()) {
             XmlPullParser.END_TAG -> depth--
             XmlPullParser.START_TAG -> depth++
+            XmlPullParser.END_DOCUMENT -> return
         }
     }
 }

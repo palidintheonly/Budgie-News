@@ -21,7 +21,8 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
 
   const isBreaking = category.toLowerCase() === "breaking";
   const isImportant = category.toLowerCase() === "important";
-  if (!isBreaking && !isImportant) return;
+  const isHeadlines = category.toLowerCase() === "headlines";
+  if (!isBreaking && !isImportant && !isHeadlines) return;
 
   const tokensSnapshot = await db.collection("deviceTokens").limit(500).get();
   const tokens = [];
@@ -30,6 +31,7 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
     const device = tokenDoc.data();
     if (isBreaking && device.breakingNotificationsEnabled === false) return;
     if (isImportant && device.importantNotificationsEnabled === false) return;
+    if (isHeadlines && device.headlinesNotificationsEnabled === false) return;
     if (typeof device.token === "string" && device.token.length > 0) {
       tokens.push(device.token);
     }
@@ -37,16 +39,31 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
 
   if (tokens.length === 0) return;
 
+  let channelId = "budgie_news_headlines";
+  if (isImportant) channelId = "budgie_news_important";
+  else if (isBreaking) channelId = "budgie_news_breaking";
+  
+  const notificationTitle = `${category}: ${article.source || "Budgie News"}`;
+  const notificationBody = String(article.title || `${category} story`).slice(0, 180);
+
   const response = await messaging.sendEachForMulticast({
     tokens,
+    notification: {
+      title: notificationTitle,
+      body: notificationBody
+    },
     data: {
       articleId,
       category,
-      title: String(article.title || `${category} story`).slice(0, 180),
+      title: notificationBody,
       source: article.source || "Budgie News"
     },
     android: {
-      priority: "high"
+      priority: "high",
+      notification: {
+        channelId,
+        clickAction: "OPEN_ARTICLE"
+      }
     }
   });
 

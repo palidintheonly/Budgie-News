@@ -1,9 +1,8 @@
 # Changelog
 
-## 0.0.11-alpha
+## 0.0.12-alpha
 
-- Applied strict minimalist dark branding with pitch-black background, off-white text, zinc borders, and 6px radius.
-- Kept the adaptive two-pane feed and article detail layout for wider screens.
-- Kept skeleton loading cards with flat, solid surfaces.
-- Refined story cards with selected state, stable image aspect ratios, and polished placeholders.
-- Added a large-screen article detail placeholder.
+- Enabled mobile push notifications for the standard "Headlines" news category.
+- Added a new Android notification channel for "Headlines".
+- Added a "Headlines alerts" toggle in the Settings screen to allow users to opt in or out of regular news notifications.
+- Firebase Cloud Functions now pushes "Headlines" notifications unless explicitly disabled by the user's device preference.

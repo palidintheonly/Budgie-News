@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.0.11-alpha"
+        versionName = "0.0.12-alpha"
     }
 
     buildFeatures {

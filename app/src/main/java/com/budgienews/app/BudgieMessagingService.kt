@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 
 class BudgieMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
+        BudgieNotifications.ensureChannels(applicationContext)
         val articleId = message.data["articleId"].orEmpty()
         if (articleId.isBlank()) return
 
@@ -35,8 +36,10 @@ class BudgieMessagingService : FirebaseMessagingService() {
         if (token.isNotBlank()) {
             BudgiePrefs.saveDeviceToken(applicationContext, token)
             CoroutineScope(Dispatchers.IO).launch {
-                runCatching { BudgieAccountApi.registerDevice(applicationContext, token) }
-                    .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                runCatching {
+                    BudgieAccountApi.ensureSession()
+                    BudgieAccountApi.registerDevice(applicationContext, token)
+                }.onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
             }
         }
     }
