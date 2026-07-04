@@ -831,6 +831,7 @@ private fun SettingsScreen(
     onSettingsChanged: (AppSettings) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -905,6 +906,14 @@ private fun SettingsScreen(
             SettingsRow(
                 title = "Send technical feedback",
                 description = "Send feedback and bug reports.",
+                onClick = {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:")
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("support@budgienews.com"))
+                        putExtra(Intent.EXTRA_SUBJECT, "Budgie News Technical Feedback (${context.appVersionText()})")
+                    }
+                    runCatching { context.startActivity(Intent.createChooser(intent, "Send technical feedback")) }
+                },
             )
         }
         item {
@@ -923,8 +932,10 @@ private fun SettingsScreen(
 private fun SettingsRow(
     title: String,
     description: String,
+    onClick: (() -> Unit)? = null,
 ) {
-    Column {
+    val modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    Column(modifier = modifier) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1956,8 +1967,7 @@ private fun android.content.Context.openUrl(url: String) {
 
 private fun Context.appVersionText(): String {
     val packageInfo = packageManager.getPackageInfo(packageName, 0)
-    val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) packageInfo.longVersionCode else @Suppress("DEPRECATION") packageInfo.versionCode.toLong()
-    return "${packageInfo.versionName} [$code]"
+    return packageInfo.versionName ?: "0.0.14-alpha"
 }
 
 @Composable
