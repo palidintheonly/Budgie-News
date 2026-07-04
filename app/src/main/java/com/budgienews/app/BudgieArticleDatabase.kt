@@ -40,6 +40,15 @@ internal object ArticleSignals {
     }
 }
 
+internal object BudgieTime {
+    val RESET_EPOCH_MILLIS = java.time.ZonedDateTime.parse("2026-07-04T00:00:00Z").toInstant().toEpochMilli()
+
+    fun minAllowedMillis(): Long {
+        val sevenDaysAgo = System.currentTimeMillis() - 604_800_000L
+        return maxOf(sevenDaysAgo, RESET_EPOCH_MILLIS)
+    }
+}
+
 internal class BudgieArticleDatabase private constructor(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "budgie_articles.db", null, 1) {
 
@@ -69,7 +78,7 @@ internal class BudgieArticleDatabase private constructor(context: Context) :
     }
 
     fun upsertArticle(article: LocalArticle) {
-        val oldestAllowed = System.currentTimeMillis() - 604_800_000L
+        val oldestAllowed = BudgieTime.minAllowedMillis()
         synchronized(this) {
             writableDatabase.beginTransaction()
             try {
@@ -104,7 +113,7 @@ internal class BudgieArticleDatabase private constructor(context: Context) :
     }
 
     fun recentArticles(limit: Int = 40): List<LocalArticle> {
-        val newestAllowed = System.currentTimeMillis() - 604_800_000L
+        val newestAllowed = BudgieTime.minAllowedMillis()
         synchronized(this) {
             writableDatabase.delete("articles", "received_at < ?", arrayOf(newestAllowed.toString()))
         }

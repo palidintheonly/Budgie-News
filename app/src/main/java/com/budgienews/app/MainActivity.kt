@@ -512,7 +512,7 @@ internal object BudgieAccountApi {
 
     fun startLiveArticles(context: Context) {
         if (liveArticleRegistration != null) return
-        val newestAllowed = System.currentTimeMillis() - 604_800_000L
+        val newestAllowed = BudgieTime.minAllowedMillis()
         liveArticleRegistration = Firebase.firestore.collection("articles")
             .whereGreaterThanOrEqualTo("publishedAtMillis", newestAllowed)
             .orderBy("publishedAtMillis", Query.Direction.DESCENDING)
@@ -581,7 +581,16 @@ private object BudgieCache {
             .apply()
     }
 
+    fun checkReset(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val lastReset = prefs.getLong("last_reset_millis", 0L)
+        if (lastReset < BudgieTime.RESET_EPOCH_MILLIS) {
+            prefs.edit().clear().putLong("last_reset_millis", BudgieTime.RESET_EPOCH_MILLIS).apply()
+        }
+    }
+
     fun load(context: Context): List<FeedItem> {
+        checkReset(context)
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ITEMS, null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
@@ -1558,6 +1567,7 @@ private fun BudgieMark() {
 }
 
 internal suspend fun loadAllFeedItems(context: Context): List<FeedItem> = withContext(Dispatchers.IO) {
+    BudgieCache.checkReset(context)
     val loadedItems = FeedSources
         .map { source ->
             runCatching { fetchFeed(source).take(12) }
@@ -1600,6 +1610,7 @@ private suspend fun fetchFeeds(
     sourceFilter: SourceFilter,
     settings: AppSettings,
 ): FeedState = withContext(Dispatchers.IO) {
+    BudgieCache.checkReset(context)
     runCatching {
         val sources = FeedSources
             .filter { sourceFilter.sourceName == null || it.name == sourceFilter.sourceName }
@@ -1725,19 +1736,20 @@ private fun parseRss(parser: XmlPullParser, fallbackSource: String): List<FeedIt
         if (event == XmlPullParser.START_TAG &&
             (parser.name.equals("item", ignoreCase = true) || parser.name.equals("entry", ignoreCase = true))
         ) {
-            items += readItem(parser, fallbackSource, parser.name)
+            readItem(parser, fallbackSource, parser.name)?.let { items += it }
         }
         event = parser.next()
     }
     return items.take(40)
 }
 
-private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag: String): FeedItem {
+private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag: String): FeedItem? {
     var title = ""
     var description = ""
     var link = ""
     var source = fallbackSource
     var pubDate = ""
+    var rawPubDate = ""
     var imageUrl: String? = null
 
     while (parser.next() != XmlPullParser.END_DOCUMENT) {
@@ -1757,7 +1769,10 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                     parser.skipTag()
                 }
             }
-            "pubdate", "published", "updated" -> pubDate = parser.readText().formatNewsDate()
+            "pubdate", "published", "updated" -> {
+                rawPubDate = parser.readText()
+                pubDate = rawPubDate.formatNewsDate()
+            }
             "source" -> source = parser.readText().ifBlank { source }
             "enclosure" -> imageUrl = parser.attributeValue("url") ?: imageUrl
             "thumbnail", "media:thumbnail", "media:content" -> imageUrl = parser.attributeValue("url") ?: imageUrl
@@ -1769,6 +1784,9 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
             else -> parser.skipTag()
         }
     }
+
+    val pubMillis = rawPubDate.toEpochMillisOrNull()
+    if (pubMillis != null && pubMillis < BudgieTime.minAllowedMillis()) return null
 
     return FeedItem(
         id = link.ifBlank { title },
@@ -1916,6 +1934,13 @@ private fun String.extractNestedImageUrl(): String {
     val nestedUrl = Uri.parse(this).getQueryParameter("url")
     return if (nestedUrl.isNullOrBlank()) this else URLDecoder.decode(nestedUrl, Charsets.UTF_8.name())
 }
+
+private fun String.toEpochMillisOrNull(): Long? =
+    runCatching {
+        ZonedDateTime.parse(this, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()
+    }.recoverCatching {
+        ZonedDateTime.parse(this).toInstant().toEpochMilli()
+    }.getOrNull()
 
 private fun String.formatNewsDate(): String =
     runCatching {
