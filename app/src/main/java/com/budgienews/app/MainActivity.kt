@@ -7,6 +7,7 @@ import android.hardware.biometrics.BiometricPrompt
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -402,6 +403,7 @@ private object BudgieFirebase {
 }
 
 internal object BudgieNotifications {
+    const val DEFAULT_CHANNEL_ID = "channel_budgie_default"
     const val BREAKING_CHANNEL_ID = "budgie_news_breaking"
     const val IMPORTANT_CHANNEL_ID = "budgie_news_important"
     const val HEADLINES_CHANNEL_ID = "budgie_news_headlines"
@@ -413,8 +415,17 @@ internal object BudgieNotifications {
             .setUsage(AudioAttributes.USAGE_NOTIFICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
+        val customSoundUri = Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.sound_chirp}")
         manager.createNotificationChannels(
             listOf(
+                NotificationChannel(
+                    DEFAULT_CHANNEL_ID,
+                    "Budgie News Alerts",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "Default Budgie News custom alerts"
+                    setSound(customSoundUri, audioAttributes)
+                },
                 NotificationChannel(
                     BREAKING_CHANNEL_ID,
                     "Breaking news",
