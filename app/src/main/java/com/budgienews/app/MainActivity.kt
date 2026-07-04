@@ -65,12 +65,18 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -832,6 +838,9 @@ private fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    var showLibrariesDialog by remember { mutableStateOf(false) }
+    var showFeedbackDialog by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -906,25 +915,173 @@ private fun SettingsScreen(
             SettingsRow(
                 title = "Send technical feedback",
                 description = "Send feedback and bug reports.",
-                onClick = {
-                    val intent = Intent(Intent.ACTION_SENDTO).apply {
-                        data = Uri.parse("mailto:")
-                        putExtra(Intent.EXTRA_EMAIL, arrayOf("support@budgienews.com"))
-                        putExtra(Intent.EXTRA_SUBJECT, "Budgie News Technical Feedback (${context.appVersionText()})")
-                    }
-                    runCatching { context.startActivity(Intent.createChooser(intent, "Send technical feedback")) }
-                },
+                onClick = { showFeedbackDialog = true },
             )
         }
         item {
             SettingsRow(
                 title = "Third party libraries",
                 description = "Firebase, Coil, AndroidX, Kotlin, and Jetpack Compose.",
+                onClick = { showLibrariesDialog = true },
             )
         }
         item {
             VersionFooter()
         }
+    }
+
+    if (showLibrariesDialog) {
+        val libraries = listOf(
+            "Firebase" to "https://firebase.google.com/",
+            "Coil" to "https://coil-kt.github.io/coil/",
+            "AndroidX" to "https://developer.android.com/jetpack/androidx",
+            "Kotlin" to "https://kotlinlang.org/",
+            "Jetpack Compose" to "https://developer.android.com/compose",
+        )
+        AlertDialog(
+            onDismissRequest = { showLibrariesDialog = false },
+            title = { TypewriterText("Third party libraries", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TypewriterText("Tap any library below to visit its official website and documentation:", color = Muted, fontSize = 14.sp, lineHeight = 20.sp)
+                    libraries.forEach { (name, url) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { context.openUrl(url) }
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                TypewriterText(name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                                TypewriterText(url, color = Accent, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLibrariesDialog = false }) {
+                    TypewriterText("Close", color = Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Paper,
+        )
+    }
+
+    if (showFeedbackDialog) {
+        var title by remember { mutableStateOf("") }
+        var content by remember { mutableStateOf("") }
+        var type by remember { mutableStateOf("Bug") }
+        var isSubmitting by remember { mutableStateOf(false) }
+        var submitStatus by remember { mutableStateOf<String?>(null) }
+        val scope = rememberCoroutineScope()
+
+        AlertDialog(
+            onDismissRequest = { if (!isSubmitting) showFeedbackDialog = false },
+            title = { TypewriterText("Send technical feedback", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    TypewriterText("Report a bug, issue, or general feedback directly to our development team.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp)
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        listOf("Bug", "Issue", "Feedback").forEach { option ->
+                            Row(
+                                modifier = Modifier.clickable { type = option },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(
+                                    selected = type == option,
+                                    onClick = { type = option },
+                                    colors = RadioButtonDefaults.colors(selectedColor = Accent, unselectedColor = Muted)
+                                )
+                                TypewriterText(option, color = Ink, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { TypewriterText("Title", color = Muted, fontSize = 12.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Accent,
+                            unfocusedBorderColor = AccentSoft,
+                            focusedTextColor = Ink,
+                            unfocusedTextColor = Ink,
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = content,
+                        onValueChange = { content = it },
+                        label = { TypewriterText("Description / Content", color = Muted, fontSize = 12.sp) },
+                        minLines = 3,
+                        maxLines = 5,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Accent,
+                            unfocusedBorderColor = AccentSoft,
+                            focusedTextColor = Ink,
+                            unfocusedTextColor = Ink,
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (submitStatus != null) {
+                        TypewriterText(
+                            text = submitStatus!!,
+                            color = if (submitStatus!!.startsWith("Error") || submitStatus!!.startsWith("Please")) Color(0xFFE53935) else Accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (title.isBlank() || content.isBlank()) {
+                            submitStatus = "Please fill in both title and content."
+                            return@Button
+                        }
+                        isSubmitting = true
+                        submitStatus = "Sending..."
+                        scope.launch(Dispatchers.IO) {
+                            val success = sendDiscordWebhook(
+                                webhookUrl = "https://discord.com/api/webhooks/1522933849234083841/6zzq9_TBDgjte6Ihxz53sfaWXHI0TN_Sen2VzxvcdbgveXQyYX_bMsr5BYZvQYE8QSZ_",
+                                title = title,
+                                content = content,
+                                type = type,
+                                version = context.appVersionText(),
+                            )
+                            withContext(Dispatchers.Main) {
+                                isSubmitting = false
+                                if (success) {
+                                    submitStatus = "Sent successfully! Thank you."
+                                    delay(1200)
+                                    showFeedbackDialog = false
+                                } else {
+                                    submitStatus = "Error sending feedback. Please try again."
+                                }
+                            }
+                        }
+                    },
+                    enabled = !isSubmitting,
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
+                ) {
+                    TypewriterText(if (isSubmitting) "Sending..." else "Send", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFeedbackDialog = false }, enabled = !isSubmitting) {
+                    TypewriterText("Cancel", color = Muted)
+                }
+            },
+            containerColor = Paper,
+        )
     }
 }
 
@@ -1969,6 +2126,53 @@ private fun Context.appVersionText(): String {
     val packageInfo = packageManager.getPackageInfo(packageName, 0)
     return packageInfo.versionName ?: "0.0.14-alpha"
 }
+
+private fun sendDiscordWebhook(
+    webhookUrl: String,
+    title: String,
+    content: String,
+    type: String,
+    version: String,
+): Boolean = runCatching {
+    val url = java.net.URL(webhookUrl)
+    val conn = url.openConnection() as java.net.HttpURLConnection
+    conn.requestMethod = "POST"
+    conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+    conn.doOutput = true
+    conn.connectTimeout = 8000
+    conn.readTimeout = 8000
+
+    val payload = org.json.JSONObject().apply {
+        put("content", "**New Budgie News Feedback** ($version)")
+        put("embeds", org.json.JSONArray().put(
+            org.json.JSONObject().apply {
+                put("title", "[$type] $title")
+                put("description", content)
+                put("color", when (type) {
+                    "Bug" -> 0xE53935
+                    "Issue" -> 0xFB8C00
+                    else -> 0x1E88E5
+                })
+                put("fields", org.json.JSONArray().apply {
+                    put(org.json.JSONObject().put("name", "Type").put("value", type).put("inline", true))
+                    put(org.json.JSONObject().put("name", "Version").put("value", version).put("inline", true))
+                    put(org.json.JSONObject().put("name", "Android / Device").put("value", "Android ${Build.VERSION.RELEASE} (${Build.MODEL})").put("inline", false))
+                })
+            }
+        ))
+    }.toString()
+
+    conn.outputStream.use { os ->
+        os.write(payload.toByteArray(Charsets.UTF_8))
+        os.flush()
+    }
+
+    val responseCode = conn.responseCode
+    conn.disconnect()
+    responseCode in 200..299
+}.onFailure {
+    FirebaseCrashlytics.getInstance().recordException(it)
+}.getOrDefault(false)
 
 @Composable
 private fun BudgieNewsTheme(content: @Composable () -> Unit) {
