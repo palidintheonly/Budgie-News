@@ -1,9 +1,6 @@
 package com.budgienews.app
 
 import android.Manifest
-import android.app.Activity
-import android.app.KeyguardManager
-import android.hardware.biometrics.BiometricPrompt
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -17,13 +14,11 @@ import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.CancellationSignal
 import android.provider.Settings
 import android.text.Html
 import android.util.Xml
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -114,9 +109,6 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.analytics
-import com.google.firebase.auth.EmailAuthProvider
-import com.google.firebase.auth.FirebaseAuthException
-import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.auth
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.firestore.FieldValue
@@ -179,10 +171,6 @@ private val UkLocationOptions = listOf(
 )
 
 class MainActivity : ComponentActivity() {
-    private var isUnlocked by mutableStateOf(false)
-    private var authMessage by mutableStateOf("Unlock Budgie News to continue.")
-    private var authInProgress = false
-
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -191,41 +179,18 @@ class MainActivity : ComponentActivity() {
             updateLocationPreference()
         }
 
-    private val credentialLauncher =
-        registerForActivityResult(StartActivityForResult()) { result ->
-            authInProgress = false
-            if (result.resultCode == Activity.RESULT_OK) {
-                unlockApp()
-            } else {
-                authMessage = "Authentication cancelled."
-            }
-        }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         BudgieNotifications.ensureChannels(this)
         handleArticleIntent(intent)
         BudgieFirebase.setup(this)
-        if (!BudgiePrefs.load(this).biometricEnabled) {
-            isUnlocked = true
-        }
         setContent {
             BudgieNewsTheme {
-                if (isUnlocked) {
-                    NewsApp(onBiometricSettingChanged = { enabled ->
-                        if (enabled) authenticate()
-                    })
-                } else {
-                    LockedApp(authMessage, onUnlock = { authenticate() })
-                }
+                NewsApp()
             }
         }
-        if (!isUnlocked) {
-            window.decorView.post { authenticate() }
-        } else {
-            requestRequiredPermissionsIfNeeded()
-        }
+        requestRequiredPermissionsIfNeeded()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -289,79 +254,6 @@ class MainActivity : ComponentActivity() {
             .maxByOrNull { it.time }
     }
 
-    private fun authenticate() {
-        if (isUnlocked || authInProgress) return
-        authInProgress = true
-        authMessage = "Waiting for authentication..."
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            authenticateWithBiometricPrompt()
-        } else {
-            authenticateWithDeviceCredential()
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun authenticateWithBiometricPrompt() {
-        val keyguardManager = getSystemService(KeyguardManager::class.java)
-        if (!keyguardManager.isDeviceSecure) {
-            authInProgress = false
-            authMessage = "Set up biometrics or a screen lock to use Budgie News."
-            return
-        }
-
-        val prompt = BiometricPrompt.Builder(this)
-            .setTitle("Unlock Budgie News")
-            .setSubtitle("Use biometrics or your screen lock")
-            .setDescription("Authentication keeps your news app private.")
-            .setDeviceCredentialAllowed(true)
-            .build()
-
-        prompt.authenticate(
-            CancellationSignal(),
-            mainExecutor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    authInProgress = false
-                    unlockApp()
-                }
-
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    authInProgress = false
-                    authMessage = errString.toString().ifBlank { "Authentication failed." }
-                }
-
-                override fun onAuthenticationFailed() {
-                    authMessage = "Authentication did not match. Try again."
-                }
-            },
-        )
-    }
-
-    @Suppress("DEPRECATION")
-    private fun authenticateWithDeviceCredential() {
-        val keyguardManager = getSystemService(KeyguardManager::class.java)
-        if (!keyguardManager.isDeviceSecure) {
-            authInProgress = false
-            authMessage = "Set up a screen lock to use Budgie News."
-            return
-        }
-        val intent = keyguardManager.createConfirmDeviceCredentialIntent(
-            "Unlock Budgie News",
-            "Confirm your screen lock to continue.",
-        )
-        if (intent == null) {
-            authInProgress = false
-            authMessage = "Device authentication is unavailable."
-        } else {
-            credentialLauncher.launch(intent)
-        }
-    }
-
-    private fun unlockApp() {
-        isUnlocked = true
-        authMessage = "Unlocked."
-        requestRequiredPermissionsIfNeeded()
-    }
 }
 
 private object BudgieFirebase {
@@ -519,16 +411,11 @@ internal object BudgieNotifications {
 
 internal object BudgiePrefs {
     private const val PREFS = "budgie_news_settings"
-    private const val KEY_BIOMETRIC = "biometric_enabled"
     private const val KEY_BREAKING = "breaking_notifications"
     private const val KEY_IMPORTANT = "important_notifications"
     private const val KEY_HEADLINES = "headlines_notifications"
     private const val KEY_SECTION = "default_section"
     private const val KEY_SOURCE = "default_source"
-    private const val KEY_ACCOUNT_ENABLED = "account_enabled"
-    private const val KEY_ACCOUNT_NAME = "account_name"
-    private const val KEY_ACCOUNT_EMAIL = "account_email"
-    private const val KEY_ACCOUNT_PASSWORD = "account_password"
     private const val KEY_LOCATION = "uk_location"
     private const val KEY_SEND_STATS = "send_stats"
     private const val KEY_DEVICE_TOKEN = "device_token"
@@ -538,16 +425,11 @@ internal object BudgiePrefs {
     fun load(context: Context): AppSettings {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return AppSettings(
-            biometricEnabled = prefs.getBoolean(KEY_BIOMETRIC, true),
             breakingNotificationsEnabled = prefs.getBoolean(KEY_BREAKING, true),
             importantNotificationsEnabled = prefs.getBoolean(KEY_IMPORTANT, true),
             headlinesNotificationsEnabled = prefs.getBoolean(KEY_HEADLINES, true),
             defaultSection = prefs.getString(KEY_SECTION, null)?.let { runCatching { NewsSection.valueOf(it) }.getOrNull() } ?: NewsSection.HEADLINES,
             defaultSource = prefs.getString(KEY_SOURCE, null)?.let { runCatching { SourceFilter.valueOf(it) }.getOrNull() } ?: SourceFilter.ALL,
-            accountEnabled = prefs.getBoolean(KEY_ACCOUNT_ENABLED, false),
-            accountName = prefs.getString(KEY_ACCOUNT_NAME, "").orEmpty(),
-            accountEmail = prefs.getString(KEY_ACCOUNT_EMAIL, "").orEmpty(),
-            accountPassword = prefs.getString(KEY_ACCOUNT_PASSWORD, "").orEmpty(),
             ukLocation = prefs.getString(KEY_LOCATION, "United Kingdom").orEmpty(),
             sendAppStatistics = prefs.getBoolean(KEY_SEND_STATS, true),
         )
@@ -556,15 +438,11 @@ internal object BudgiePrefs {
     fun save(context: Context, settings: AppSettings) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putBoolean(KEY_BIOMETRIC, settings.biometricEnabled)
             .putBoolean(KEY_BREAKING, settings.breakingNotificationsEnabled)
             .putBoolean(KEY_IMPORTANT, settings.importantNotificationsEnabled)
             .putBoolean(KEY_HEADLINES, settings.headlinesNotificationsEnabled)
             .putString(KEY_SECTION, settings.defaultSection.name)
             .putString(KEY_SOURCE, settings.defaultSource.name)
-            .putBoolean(KEY_ACCOUNT_ENABLED, settings.accountEnabled)
-            .putString(KEY_ACCOUNT_NAME, settings.accountName)
-            .putString(KEY_ACCOUNT_EMAIL, settings.accountEmail)
             .putString(KEY_LOCATION, settings.ukLocation)
             .putBoolean(KEY_SEND_STATS, settings.sendAppStatistics)
             .apply()
@@ -582,14 +460,6 @@ internal object BudgiePrefs {
 
     suspend fun saveAndSync(context: Context, settings: AppSettings) {
         save(context, settings)
-        if (!settings.accountEnabled || settings.accountEmail.isBlank()) return
-        withContext(Dispatchers.IO) {
-            runCatching {
-                BudgieAccountApi.sync(settings)
-            }.onFailure { error ->
-                FirebaseCrashlytics.getInstance().recordException(error)
-            }
-        }
     }
 
     fun shouldNotify(context: Context, section: NewsSection, item: FeedItem, settings: AppSettings): Boolean {
@@ -620,56 +490,6 @@ internal object BudgieAccountApi {
         }
     }
 
-    suspend fun register(settings: AppSettings) {
-        require(settings.accountEmail.isNotBlank()) { "Email is required" }
-        require(settings.accountPassword.length >= 6) { "Password must be at least 6 characters" }
-        val credential = EmailAuthProvider.getCredential(settings.accountEmail, settings.accountPassword)
-        val currentUser = Firebase.auth.currentUser
-        if (currentUser?.isAnonymous == true) {
-            runCatching {
-                currentUser.linkWithCredential(credential).await()
-            }.recoverCatching { error ->
-                if (error is FirebaseAuthUserCollisionException) {
-                    Firebase.auth.signInWithEmailAndPassword(settings.accountEmail, settings.accountPassword).await()
-                } else {
-                    throw error
-                }
-            }.getOrThrow()
-        } else {
-            Firebase.auth.createUserWithEmailAndPassword(settings.accountEmail, settings.accountPassword).await()
-        }
-        sync(settings.copy(accountEnabled = true))
-    }
-
-    suspend fun login(settings: AppSettings) {
-        require(settings.accountEmail.isNotBlank()) { "Email is required" }
-        require(settings.accountPassword.isNotBlank()) { "Password is required" }
-        Firebase.auth.signInWithEmailAndPassword(settings.accountEmail, settings.accountPassword).await()
-        sync(settings.copy(accountEnabled = true))
-    }
-
-    suspend fun sync(settings: AppSettings) {
-        val user = Firebase.auth.currentUser ?: return
-        val data = mapOf(
-            "uid" to user.uid,
-            "email" to settings.accountEmail,
-            "displayName" to settings.accountName.ifBlank { "Budgie reader" },
-            "ukLocation" to settings.ukLocation,
-            "defaultSection" to settings.defaultSection.name,
-            "defaultSource" to settings.defaultSource.name,
-            "biometricEnabled" to settings.biometricEnabled,
-            "breakingNotificationsEnabled" to settings.breakingNotificationsEnabled,
-            "importantNotificationsEnabled" to settings.importantNotificationsEnabled,
-            "headlinesNotificationsEnabled" to settings.headlinesNotificationsEnabled,
-            "sendAppStatistics" to settings.sendAppStatistics,
-            "updatedAt" to FieldValue.serverTimestamp(),
-        )
-        Firebase.firestore.collection("users")
-            .document(user.uid)
-            .set(data, SetOptions.merge())
-            .await()
-    }
-
     suspend fun registerDevice(context: Context, token: String) {
         if (token.isBlank()) return
         ensureSession()
@@ -678,7 +498,6 @@ internal object BudgieAccountApi {
         val data = mapOf(
             "token" to token,
             "uid" to uid,
-            "email" to settings.accountEmail,
             "ukLocation" to settings.ukLocation,
             "breakingNotificationsEnabled" to settings.breakingNotificationsEnabled,
             "importantNotificationsEnabled" to settings.importantNotificationsEnabled,
@@ -738,19 +557,6 @@ internal object BudgieAccountApi {
         replace(Regex("[^A-Za-z0-9_-]"), "_").take(140).ifBlank { "unknown-token" }
 }
 
-private fun Throwable.userFacingAuthMessage(action: String): String {
-    val authCode = (this as? FirebaseAuthException)?.errorCode.orEmpty()
-    return when (authCode) {
-        "ERROR_CONFIGURATION_NOT_FOUND" -> "$action failed: Firebase Auth is not initialized for project moneybytes-apk. Enable Authentication, then enable Email/Password sign-in. If Firebase asks for billing, billing must be enabled before Auth can initialize."
-        "ERROR_OPERATION_NOT_ALLOWED" -> "$action failed: Email/Password sign-in is disabled in Firebase Console."
-        "ERROR_INVALID_EMAIL" -> "$action failed: enter a valid email address."
-        "ERROR_EMAIL_ALREADY_IN_USE" -> "$action failed: email is already registered. Use Login."
-        "ERROR_WRONG_PASSWORD", "ERROR_INVALID_CREDENTIAL" -> "$action failed: email or password is wrong."
-        "ERROR_USER_NOT_FOUND" -> "$action failed: no account exists for that email."
-        "ERROR_WEAK_PASSWORD" -> "$action failed: password must be at least 6 characters."
-        else -> "$action failed: ${message ?: "unknown Firebase Auth error"}"
-    }
-}
 
 private object BudgieCache {
     private const val PREFS = "budgie_news_cache"
