@@ -127,6 +127,8 @@ import com.google.firebase.remoteconfig.remoteConfig
 import com.google.firebase.remoteconfig.remoteConfigSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -190,12 +192,18 @@ class MainActivity : ComponentActivity() {
         BudgieNotifications.ensureChannels(this)
         handleArticleIntent(intent)
         BudgieFirebase.setup(this)
+        BudgieVersionCheck.startMonitoring(this)
         setContent {
             BudgieNewsTheme {
                 NewsApp()
             }
         }
         requestRequiredPermissionsIfNeeded()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        BudgieVersionCheck.startMonitoring(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -555,6 +563,79 @@ internal object BudgieAccountApi {
         replace(Regex("[^A-Za-z0-9_-]"), "_").take(140).ifBlank { "unknown-token" }
 }
 
+internal data class AppUpdateConfig(
+    val minRequiredVersion: String = "0.0.14-alpha",
+    val updateMessage: String = "An important update for Budgie News is available. Please update your app to continue reading news.",
+    val updateUrl: String = "https://budgienews.com",
+    val isOutdated: Boolean = false,
+)
+
+internal object BudgieVersionCheck {
+    private val _config = MutableStateFlow(AppUpdateConfig())
+    val config = _config.asStateFlow()
+
+    private var registration: ListenerRegistration? = null
+
+    fun startMonitoring(context: Context) {
+        val currentVersion = context.appVersionText()
+        if (registration == null) {
+            registration = Firebase.firestore.collection("config")
+                .document("version")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        FirebaseCrashlytics.getInstance().recordException(error)
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null && !snapshot.exists()) {
+                        runCatching {
+                            Firebase.firestore.collection("config")
+                                .document("version")
+                                .set(
+                                    mapOf(
+                                        "minRequiredVersion" to "0.0.14-alpha",
+                                        "updateMessage" to "An important update for Budgie News is available. Please update your app to continue reading news.",
+                                        "updateUrl" to "https://budgienews.com",
+                                        "forceLock" to false,
+                                    ),
+                                    SetOptions.merge()
+                                )
+                        }
+                    }
+                    val minVersion = snapshot?.getString("minRequiredVersion") ?: "0.0.14-alpha"
+                    val message = snapshot?.getString("updateMessage") ?: "A new version of Budgie News is required. Please update your app to continue reading news."
+                    val url = snapshot?.getString("updateUrl") ?: "https://budgienews.com"
+                    val forceLock = snapshot?.getBoolean("forceLock") == true
+
+                    val outdated = forceLock || compareVersions(currentVersion, minVersion) < 0
+                    _config.value = AppUpdateConfig(
+                        minRequiredVersion = minVersion,
+                        updateMessage = message,
+                        updateUrl = url,
+                        isOutdated = outdated,
+                    )
+                }
+        }
+    }
+
+    private fun compareVersions(current: String, minRequired: String): Int {
+        if (current == minRequired) return 0
+        val currentParts = current.substringBefore("-").split(".").mapNotNull { it.toIntOrNull() }
+        val minParts = minRequired.substringBefore("-").split(".").mapNotNull { it.toIntOrNull() }
+        val maxLen = maxOf(currentParts.size, minParts.size)
+        for (i in 0 until maxLen) {
+            val c = currentParts.getOrElse(i) { 0 }
+            val m = minParts.getOrElse(i) { 0 }
+            if (c != m) return c.compareTo(m)
+        }
+        val currentSuffix = current.substringAfter("-", "")
+        val minSuffix = minRequired.substringAfter("-", "")
+        if (currentSuffix == minSuffix) return 0
+        if (currentSuffix.isEmpty()) return 1
+        if (minSuffix.isEmpty()) return -1
+        return currentSuffix.compareTo(minSuffix)
+    }
+}
+
 
 private object BudgieCache {
     private const val PREFS = "budgie_news_cache"
@@ -692,6 +773,7 @@ private fun NewsApp() {
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     val articleSignal by ArticleSignals.version.collectAsState()
     val openArticleId by ArticleSignals.openArticleId.collectAsState()
+    val updateConfig by BudgieVersionCheck.config.collectAsState()
     val scope = rememberCoroutineScope()
 
     BackHandler(enabled = selectedItem != null || settingsOpen) {
@@ -820,6 +902,59 @@ private fun NewsApp() {
                     }
                 }
             }
+        }
+
+        if (updateConfig.isOutdated) {
+            AlertDialog(
+                onDismissRequest = {},
+                properties = androidx.compose.ui.window.DialogProperties(
+                    dismissOnBackPress = false,
+                    dismissOnClickOutside = false,
+                    usePlatformDefaultWidth = false,
+                ),
+                modifier = Modifier.fillMaxWidth(0.9f),
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Rounded.PriorityHigh, contentDescription = null, tint = Color(0xFFE53935))
+                        TypewriterText("Update Required", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        TypewriterText(
+                            text = updateConfig.updateMessage,
+                            color = Muted,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                        )
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    TypewriterText("Current Version", color = Muted, fontSize = 12.sp)
+                                    TypewriterText(context.appVersionText(), color = Alert, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    TypewriterText("Required Version", color = Muted, fontSize = 12.sp)
+                                    TypewriterText(updateConfig.minRequiredVersion, color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { context.openUrl(updateConfig.updateUrl) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        TypewriterText("Update Now", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                containerColor = Paper,
+            )
         }
     }
 }

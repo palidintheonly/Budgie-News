@@ -1,5 +1,6 @@
 const admin = require("firebase-admin");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onRequest } = require("firebase-functions/v2/https");
 const { logger } = require("firebase-functions");
 
 admin.initializeApp();
@@ -82,4 +83,26 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
   await Promise.all(
     invalidTokens.map((token) => db.collection("deviceTokens").doc(token.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 140)).delete())
   );
+});
+
+exports.initVersionConfig = onRequest(async (req, res) => {
+  try {
+    const configRef = db.collection("config").doc("version");
+    const doc = await configRef.get();
+    if (!doc.exists) {
+      await configRef.set({
+        minRequiredVersion: "0.0.14-alpha",
+        updateMessage: "An important update for Budgie News is available. Please update your app to continue reading news.",
+        updateUrl: "https://budgienews.com",
+        forceLock: false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.status(200).send("Initialized config/version with default values.");
+    } else {
+      res.status(200).send("config/version already exists: " + JSON.stringify(doc.data()));
+    }
+  } catch (error) {
+    logger.error("Error initializing config/version", error);
+    res.status(500).send("Error: " + error.message);
+  }
 });
