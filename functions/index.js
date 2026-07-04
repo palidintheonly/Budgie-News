@@ -39,7 +39,7 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
 
   if (tokens.length === 0) return;
 
-  let channelId = "budgie_news_headlines";
+  let channelId = "channel_budgie_default";
   if (isImportant) channelId = "budgie_news_important";
   else if (isBreaking) channelId = "budgie_news_breaking";
   
@@ -62,7 +62,8 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
       priority: "high",
       notification: {
         channelId,
-        clickAction: "OPEN_ARTICLE"
+        clickAction: "OPEN_ARTICLE",
+        sound: "sound_chirp"
       }
     }
   });

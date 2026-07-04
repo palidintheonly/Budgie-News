@@ -367,7 +367,7 @@ class MainActivity : ComponentActivity() {
 private object BudgieFirebase {
     fun setup(context: Context) {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.13-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.14-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             runCatching {
@@ -432,7 +432,7 @@ internal object BudgieNotifications {
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
                     description = "Breaking Budgie News alerts"
-                    setSound(Settings.System.DEFAULT_NOTIFICATION_URI, audioAttributes)
+                    setSound(customSoundUri, audioAttributes)
                 },
                 NotificationChannel(
                     IMPORTANT_CHANNEL_ID,
@@ -440,7 +440,7 @@ internal object BudgieNotifications {
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
                     description = "Important Budgie News alerts"
-                    setSound(Settings.System.DEFAULT_ALARM_ALERT_URI, audioAttributes)
+                    setSound(customSoundUri, audioAttributes)
                 },
                 NotificationChannel(
                     HEADLINES_CHANNEL_ID,
@@ -465,7 +465,7 @@ internal object BudgieNotifications {
         val channelId = when (section) {
             NewsSection.BREAKING -> BREAKING_CHANNEL_ID
             NewsSection.IMPORTANT -> IMPORTANT_CHANNEL_ID
-            NewsSection.HEADLINES -> HEADLINES_CHANNEL_ID
+            NewsSection.HEADLINES -> DEFAULT_CHANNEL_ID
         }
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP

@@ -1,7 +1,7 @@
 # Changelog
 
-## 0.0.13-alpha
+## 0.0.14-alpha
 
-- Fixed a bug where out-of-app push notifications would fail to open the app by adding the missing `OPEN_ARTICLE` intent filter to `AndroidManifest.xml`.
-- Removed Firebase In-App Messaging to reduce bloat as it was deemed pointless.
-- Rewrote "curated" UI taglines to sound more journalistic and professional ("Reporting from leading UK newsrooms").
+- Implemented primary custom notification sound (`sound_chirp.ogg`) across the Android app and Firebase Cloud Functions.
+- Registered baseline notification channel `channel_budgie_default` ("Budgie News Alerts") configured with high importance and custom audio attributes.
+- Updated Firebase push notification payloads to specify `sound: "sound_chirp"` and route standard alerts to the new custom channel.
