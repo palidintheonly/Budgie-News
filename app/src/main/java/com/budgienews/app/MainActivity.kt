@@ -622,16 +622,11 @@ internal data class FeedSource(
 )
 
 internal data class AppSettings(
-    val biometricEnabled: Boolean = true,
     val breakingNotificationsEnabled: Boolean = true,
     val importantNotificationsEnabled: Boolean = true,
     val headlinesNotificationsEnabled: Boolean = true,
     val defaultSection: NewsSection = NewsSection.HEADLINES,
     val defaultSource: SourceFilter = SourceFilter.ALL,
-    val accountEnabled: Boolean = false,
-    val accountName: String = "",
-    val accountEmail: String = "",
-    val accountPassword: String = "",
     val ukLocation: String = "United Kingdom",
     val sendAppStatistics: Boolean = true,
 )
@@ -679,7 +674,7 @@ internal sealed interface FeedState {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
+private fun NewsApp() {
     val context = LocalContext.current
     var settings by remember { mutableStateOf(BudgiePrefs.load(context)) }
     var refreshToken by remember { mutableStateOf(0) }
@@ -706,7 +701,6 @@ private fun NewsApp(onBiometricSettingChanged: (Boolean) -> Unit) {
                     .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
             }
         }
-        onBiometricSettingChanged(updated.biometricEnabled)
     }
 
     fun refresh() {
@@ -829,95 +823,12 @@ private fun SettingsScreen(
     onSettingsChanged: (AppSettings) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var accountMessage by remember { mutableStateOf("") }
-
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .background(Paper),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
-        item {
-            SettingsRow(
-                title = "Account",
-                description = if (settings.accountEnabled) {
-                    settings.accountEmail.ifBlank { "Budgie account enabled" }
-                } else {
-                    "Register or log in to sync settings and live-news preferences"
-                },
-            )
-        }
-        item {
-            SettingsSwitchRow(
-                title = "Use account",
-                description = "Register or log in with Firebase Auth.",
-                checked = settings.accountEnabled,
-                onCheckedChange = { onSettingsChanged(settings.copy(accountEnabled = it)) },
-            )
-        }
-        if (settings.accountEnabled) {
-            item {
-                SettingsTextField(
-                    title = "Display name",
-                    value = settings.accountName,
-                    placeholder = "Budgie reader",
-                    onValueChange = { onSettingsChanged(settings.copy(accountName = it)) },
-                )
-            }
-            item {
-                SettingsTextField(
-                    title = "Email",
-                    value = settings.accountEmail,
-                    placeholder = "name@example.com",
-                    onValueChange = { onSettingsChanged(settings.copy(accountEmail = it)) },
-                )
-            }
-            item {
-                SettingsTextField(
-                    title = "Password",
-                    value = settings.accountPassword,
-                    placeholder = "Required for register and login",
-                    onValueChange = { onSettingsChanged(settings.copy(accountPassword = it)) },
-                )
-            }
-            item {
-                SettingsAuthActions(
-                    message = accountMessage,
-                    onRegister = {
-                        accountMessage = "Registering..."
-                        scope.launch(Dispatchers.IO) {
-                            runCatching {
-                                BudgieAccountApi.register(settings)
-                                BudgiePrefs.saveAndSync(context, settings)
-                            }.fold(
-                                onSuccess = { accountMessage = "Account registered and synced." },
-                                onFailure = {
-                                    FirebaseCrashlytics.getInstance().recordException(it)
-                                    accountMessage = it.userFacingAuthMessage("Register")
-                                },
-                            )
-                        }
-                    },
-                    onLogin = {
-                        accountMessage = "Logging in..."
-                        scope.launch(Dispatchers.IO) {
-                            runCatching {
-                                BudgieAccountApi.login(settings)
-                                BudgiePrefs.saveAndSync(context, settings)
-                            }.fold(
-                                onSuccess = { accountMessage = "Logged in and synced." },
-                                onFailure = {
-                                    FirebaseCrashlytics.getInstance().recordException(it)
-                                    accountMessage = it.userFacingAuthMessage("Login")
-                                },
-                            )
-                        }
-                    },
-                )
-            }
-        }
         item {
             SettingsChoiceRow(
                 title = "Location",
@@ -976,14 +887,6 @@ private fun SettingsScreen(
         }
         item {
             SettingsSwitchRow(
-                title = "Biometric login",
-                description = "Require device authentication when opening Budgie News.",
-                checked = settings.biometricEnabled,
-                onCheckedChange = { onSettingsChanged(settings.copy(biometricEnabled = it)) },
-            )
-        }
-        item {
-            SettingsSwitchRow(
                 title = "Send app statistics",
                 description = "Budgie News uses this to analyse crashes, feed failures, and app quality.",
                 checked = settings.sendAppStatistics,
@@ -993,7 +896,7 @@ private fun SettingsScreen(
         item {
             SettingsRow(
                 title = "Send technical feedback",
-                description = "Prepared for future account-backed feedback sync.",
+                description = "Send feedback and bug reports.",
             )
         }
         item {
@@ -1116,42 +1019,6 @@ private fun SettingsTextField(
     }
 }
 
-@Composable
-private fun SettingsAuthActions(
-    message: String,
-    onRegister: () -> Unit,
-    onLogin: () -> Unit,
-) {
-    Column {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    onClick = onRegister,
-                    shape = RoundedCornerShape(6.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
-                ) {
-                    Text("Register")
-                }
-                Button(
-                    onClick = onLogin,
-                    shape = RoundedCornerShape(6.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceRaised, contentColor = Ink),
-                ) {
-                    Text("Login")
-                }
-            }
-            if (message.isNotBlank()) {
-                TypewriterText(message, color = Muted, fontSize = 13.sp, maxLines = 2)
-            }
-        }
-        HorizontalDivider(color = Accent, thickness = 1.dp)
-    }
-}
 
 @Composable
 private fun VersionFooter() {
@@ -1246,29 +1113,6 @@ private fun TypewriterText(
     )
 }
 
-@Composable
-private fun LockedApp(message: String, onUnlock: () -> Unit) {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Paper)
-            .padding(28.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            BudgieMark()
-            TypewriterText("Budgie News", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            TypewriterText(message, color = Muted, lineHeight = 20.sp, maxLines = 3)
-            Button(
-                onClick = onUnlock,
-                shape = RoundedCornerShape(6.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
-            ) {
-                Text("Unlock")
-            }
-        }
-    }
-}
 
 @Composable
 private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
