@@ -15,7 +15,7 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
   const articleId = article.articleId || event.params.articleId;
   const category = article.category || "Headlines";
   const publishedAtMillis = Number(article.publishedAtMillis || Date.now());
-  const newestAllowed = Date.now() - 86_400_000;
+  const newestAllowed = Date.now() - 604_800_000;
 
   if (!articleId || publishedAtMillis < newestAllowed) return;
 

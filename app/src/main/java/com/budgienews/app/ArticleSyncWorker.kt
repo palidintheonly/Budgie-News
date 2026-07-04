@@ -43,8 +43,8 @@ class ArticleSyncWorker(
         val document = Firebase.firestore.collection("articles").document(articleId).get().await()
         if (!document.exists()) error("Firestore article not found: $articleId")
         val publishedAtMillis = document.getLong("publishedAtMillis") ?: System.currentTimeMillis()
-        val newestAllowed = System.currentTimeMillis() - 86_400_000L
-        if (publishedAtMillis < newestAllowed) error("Firestore article is older than 24 hours: $articleId")
+        val newestAllowed = System.currentTimeMillis() - 604_800_000L
+        if (publishedAtMillis < newestAllowed) error("Firestore article is older than 7 days: $articleId")
 
         return LocalArticle(
             articleId = document.getString("articleId") ?: document.id,

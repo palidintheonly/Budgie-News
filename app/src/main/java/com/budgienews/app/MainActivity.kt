@@ -77,7 +77,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -513,7 +512,7 @@ internal object BudgieAccountApi {
 
     fun startLiveArticles(context: Context) {
         if (liveArticleRegistration != null) return
-        val newestAllowed = System.currentTimeMillis() - 86_400_000L
+        val newestAllowed = System.currentTimeMillis() - 604_800_000L
         liveArticleRegistration = Firebase.firestore.collection("articles")
             .whereGreaterThanOrEqualTo("publishedAtMillis", newestAllowed)
             .orderBy("publishedAtMillis", Query.Direction.DESCENDING)
@@ -992,32 +991,6 @@ private fun SettingsChoiceRow(
     }
 }
 
-@Composable
-private fun SettingsTextField(
-    title: String,
-    value: String,
-    placeholder: String,
-    onValueChange: (String) -> Unit,
-) {
-    Column {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                placeholder = { Text(placeholder, color = Muted) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        HorizontalDivider(color = Accent, thickness = 1.dp)
-    }
-}
 
 
 @Composable

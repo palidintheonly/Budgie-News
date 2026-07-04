@@ -69,6 +69,7 @@ internal class BudgieArticleDatabase private constructor(context: Context) :
     }
 
     fun upsertArticle(article: LocalArticle) {
+        val oldestAllowed = System.currentTimeMillis() - 604_800_000L
         synchronized(this) {
             writableDatabase.beginTransaction()
             try {
@@ -85,6 +86,7 @@ internal class BudgieArticleDatabase private constructor(context: Context) :
                     put("received_at", System.currentTimeMillis())
                 }
                 writableDatabase.insertWithOnConflict("articles", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                writableDatabase.delete("articles", "received_at < ?", arrayOf(oldestAllowed.toString()))
                 writableDatabase.setTransactionSuccessful()
             } finally {
                 writableDatabase.endTransaction()
@@ -102,7 +104,10 @@ internal class BudgieArticleDatabase private constructor(context: Context) :
     }
 
     fun recentArticles(limit: Int = 40): List<LocalArticle> {
-        val newestAllowed = System.currentTimeMillis() - 86_400_000L
+        val newestAllowed = System.currentTimeMillis() - 604_800_000L
+        synchronized(this) {
+            writableDatabase.delete("articles", "received_at < ?", arrayOf(newestAllowed.toString()))
+        }
         val rows = readableDatabase.query(
             "articles",
             arrayOf("article_id", "title", "description", "link", "source", "published_at", "image_url", "category", "is_read"),
