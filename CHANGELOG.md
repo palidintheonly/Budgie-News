@@ -8,4 +8,5 @@
 - Removed experimental biometric screen lock and user account login/registration features to streamline the app experience and keep it lightweight.
 - Extended news feed story retention from 24 hours to 1 week (7 days) across local SQLite storage, live Firestore feeds, background sync workers, and Cloud Functions.
 - Added active SQLite database pruning to permanently delete articles older than 1 week upon saving and querying, saving storage space on the device.
+- Implemented a news feed reset rule so that stories start fresh from today onwards (July 4, 2026), automatically clearing older cached stories while maintaining the ongoing 7-day retention rule.
 - Cleaned and optimized codebase by removing unused Compose components (`SettingsTextField`, `OutlinedTextField`).
