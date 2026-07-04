@@ -12,4 +12,5 @@
 - Implemented an interactive popup form for "Send technical feedback" allowing users to submit bug reports, issues, and feedback directly to a Discord webhook with app and device metadata.
 - Added an interactive popup dialog for "Third party libraries" displaying clickable links to official websites and documentation (Firebase, Coil, AndroidX, Kotlin, Jetpack Compose).
 - Formatted version display in settings to cleanly show `0.0.14-alpha` without internal build codes.
+- Removed local in-app notification generation (`FeedNotificationWorker` and local feed polling alerts) so that alerts are strictly triggered via system push notifications (Firebase Cloud Messaging).
 - Cleaned and optimized codebase by removing unused Compose components (`SettingsTextField`).

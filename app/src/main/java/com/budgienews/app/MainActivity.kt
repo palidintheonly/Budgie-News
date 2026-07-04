@@ -354,7 +354,7 @@ internal object BudgieNotifications {
     const val EXTRA_ARTICLE_ID = "com.budgienews.app.extra.ARTICLE_ID"
     const val EXTRA_ARTICLE_CATEGORY = "com.budgienews.app.extra.ARTICLE_CATEGORY"
 
-    fun notifyFor(context: Context, section: NewsSection, item: FeedItem, articleId: String = item.link) {
+    private fun notifyFor(context: Context, section: NewsSection, item: FeedItem, articleId: String = item.link) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -545,15 +545,8 @@ internal object BudgieAccountApi {
                         )
                     }
                     .orEmpty()
-                    .filter { it.title.isNotBlank() && it.link.isNotBlank() }
-                val settings = BudgiePrefs.load(context)
                 articles.forEach { article ->
                     BudgieArticleDatabase.get(context).upsertArticle(article)
-                    val section = article.category.toNewsSection() ?: return@forEach
-                    val item = article.toFeedItem()
-                    if (BudgiePrefs.shouldNotify(context, section, item, settings)) {
-                        BudgieNotifications.notifyFor(context, section, item, articleId = article.articleId)
-                    }
                 }
             }
     }
@@ -1734,44 +1727,6 @@ private fun BudgieMark() {
     }
 }
 
-internal suspend fun loadAllFeedItems(context: Context): List<FeedItem> = withContext(Dispatchers.IO) {
-    BudgieCache.checkReset(context)
-    val loadedItems = FeedSources
-        .map { source ->
-            runCatching { fetchFeed(source).take(12) }
-                .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
-                .getOrDefault(emptyList())
-        }
-        .interleaved()
-        .distinctBy { it.link.ifBlank { it.title } }
-    if (loadedItems.isNotEmpty()) {
-        BudgieCache.save(context, loadedItems)
-        loadedItems
-    } else {
-        BudgieCache.load(context).distinctBy { it.link.ifBlank { it.title } }
-    }
-}
-
-internal fun notifyForNewFeedStories(
-    context: Context,
-    items: List<FeedItem>,
-    settings: AppSettings = BudgiePrefs.load(context),
-) {
-    listOf(NewsSection.BREAKING, NewsSection.IMPORTANT).forEach { section ->
-        items.filterFor(section).firstOrNull()?.let { item ->
-            if (BudgiePrefs.shouldNotify(context, section, item, settings)) {
-                BudgieNotifications.notifyFor(context, section, item)
-            }
-        }
-    }
-}
-
-private fun String.toNewsSection(): NewsSection? = when (lowercase()) {
-    "breaking" -> NewsSection.BREAKING
-    "important" -> NewsSection.IMPORTANT
-    else -> null
-}
-
 private suspend fun fetchFeeds(
     context: Context,
     section: NewsSection,
@@ -1807,7 +1762,6 @@ private suspend fun fetchFeeds(
             error("No stories loaded from $sourceNames")
         }
         val allItems = (localItems + availableItems).distinctBy { it.link.ifBlank { it.title } }
-        notifyForNewFeedStories(context, allItems, settings)
         val filteredItems = allItems
             .filterFor(section)
             .take(24)
