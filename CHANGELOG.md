@@ -1,17 +1,10 @@
 # Changelog
 
-## 0.0.14-alpha
+## 0.0.15-alpha (Pre-Beta Polish Release)
 
-- Implemented primary custom notification sound (`sound_chirp.ogg`) across the Android app and Firebase Cloud Functions.
-- Registered baseline notification channel `channel_budgie_default` ("Budgie News Alerts") configured with high importance and custom audio attributes.
-- Updated Firebase push notification payloads to specify `sound: "sound_chirp"` and route standard alerts to the new custom channel.
-- Removed experimental biometric screen lock and user account login/registration features to streamline the app experience and keep it lightweight.
-- Extended news feed story retention from 24 hours to 1 week (7 days) across local SQLite storage, live Firestore feeds, background sync workers, and Cloud Functions.
-- Added active SQLite database pruning to permanently delete articles older than 1 week upon saving and querying, saving storage space on the device.
-- Implemented a news feed reset rule so that stories start fresh from today onwards (July 4, 2026), automatically clearing older cached stories while maintaining the ongoing 7-day retention rule.
-- Implemented an interactive popup form for "Send technical feedback" allowing users to submit bug reports, issues, and feedback directly to a Discord webhook with app and device metadata.
-- Added an interactive popup dialog for "Third party libraries" displaying clickable links to official websites and documentation (Firebase, Coil, AndroidX, Kotlin, Jetpack Compose).
-- Formatted version display in settings to cleanly show `0.0.14-alpha` without internal build codes.
-- Removed local in-app notification generation (`FeedNotificationWorker` and local feed polling alerts) so that alerts are strictly triggered via system push notifications (Firebase Cloud Messaging).
-- Implemented real-time minimum version locking via Firebase Firestore (`config/version`), checking on each app open/start and locking outdated devices with an undismissable "Update Required" dialog.
-- Cleaned and optimized codebase by removing unused Compose components (`SettingsTextField`).
+- Achieved pre-beta level UI polish, readability, and responsiveness across the entire application, ensuring seamless performance and legibility across all form factors and Android API levels (Android 8.1.0 through Android 17).
+- Fixed text readability and formatting by establishing proportional font size and line height ratios across news cards, lists, detail views, and settings, eliminating line overlap under system font scaling.
+- Eliminated text flickering and lag during list scrolling by replacing character-by-character typewriter delay loops on news headlines, descriptions, settings labels, and dialogs with instant, solid text rendering.
+- Retained the signature retro typewriter animation exclusively on the TopAppBar brand title ("Budgie News") when opening the app.
+- Enhanced HTML stripping and whitespace normalization in RSS feed descriptions and titles to prevent awkward gaps, line wraps, and uncleaned formatting.
+

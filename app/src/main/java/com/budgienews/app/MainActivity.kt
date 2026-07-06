@@ -272,7 +272,7 @@ class MainActivity : ComponentActivity() {
 private object BudgieFirebase {
     fun setup(context: Context) {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.14-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.15-alpha")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             runCatching {
@@ -564,7 +564,7 @@ internal object BudgieAccountApi {
 }
 
 internal data class AppUpdateConfig(
-    val minRequiredVersion: String = "0.0.14-alpha",
+    val minRequiredVersion: String = "0.0.15-alpha",
     val updateMessage: String = "An important update for Budgie News is available. Please update your app to continue reading news.",
     val updateUrl: String = "https://budgienews.com",
     val isOutdated: Boolean = false,
@@ -592,7 +592,7 @@ internal object BudgieVersionCheck {
                                 .document("version")
                                 .set(
                                     mapOf(
-                                        "minRequiredVersion" to "0.0.14-alpha",
+                                        "minRequiredVersion" to "0.0.15-alpha",
                                         "updateMessage" to "An important update for Budgie News is available. Please update your app to continue reading news.",
                                         "updateUrl" to "https://budgienews.com",
                                         "forceLock" to false,
@@ -601,7 +601,7 @@ internal object BudgieVersionCheck {
                                 )
                         }
                     }
-                    val minVersion = snapshot?.getString("minRequiredVersion") ?: "0.0.14-alpha"
+                    val minVersion = snapshot?.getString("minRequiredVersion") ?: "0.0.15-alpha"
                     val message = snapshot?.getString("updateMessage") ?: "A new version of Budgie News is required. Please update your app to continue reading news."
                     val url = snapshot?.getString("updateUrl") ?: "https://budgienews.com"
                     val forceLock = snapshot?.getBoolean("forceLock") == true
@@ -832,7 +832,7 @@ private fun NewsApp() {
                         Spacer(Modifier.size(10.dp))
                         Column {
                             TypewriterText("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            TypewriterText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp)
+                            BudgieText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
                         }
                     }
                 },
@@ -916,12 +916,12 @@ private fun NewsApp() {
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Rounded.PriorityHigh, contentDescription = null, tint = Color(0xFFE53935))
-                        TypewriterText("Update Required", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        BudgieText("Update Required", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
                     }
                 },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        TypewriterText(
+                        BudgieText(
                             text = updateConfig.updateMessage,
                             color = Muted,
                             fontSize = 14.sp,
@@ -933,12 +933,12 @@ private fun NewsApp() {
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    TypewriterText("Current Version", color = Muted, fontSize = 12.sp)
-                                    TypewriterText(context.appVersionText(), color = Alert, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    BudgieText("Current Version", color = Muted, fontSize = 12.sp, lineHeight = 16.sp)
+                                    BudgieText(context.appVersionText(), color = Alert, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium)
                                 }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    TypewriterText("Required Version", color = Muted, fontSize = 12.sp)
-                                    TypewriterText(updateConfig.minRequiredVersion, color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    BudgieText("Required Version", color = Muted, fontSize = 12.sp, lineHeight = 16.sp)
+                                    BudgieText(updateConfig.minRequiredVersion, color = Color(0xFF4CAF50), fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -950,7 +950,7 @@ private fun NewsApp() {
                         colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        TypewriterText("Update Now", color = Color.White, fontWeight = FontWeight.Bold)
+                        BudgieText("Update Now", color = Color.White, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
                     }
                 },
                 containerColor = Paper,
@@ -1068,10 +1068,10 @@ private fun SettingsScreen(
         )
         AlertDialog(
             onDismissRequest = { showLibrariesDialog = false },
-            title = { TypewriterText("Third party libraries", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) },
+            title = { BudgieText("Third party libraries", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TypewriterText("Tap any library below to visit its official website and documentation:", color = Muted, fontSize = 14.sp, lineHeight = 20.sp)
+                    BudgieText("Tap any library below to visit its official website and documentation:", color = Muted, fontSize = 14.sp, lineHeight = 20.sp)
                     libraries.forEach { (name, url) ->
                         Row(
                             modifier = Modifier
@@ -1082,8 +1082,8 @@ private fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column {
-                                TypewriterText(name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                                TypewriterText(url, color = Accent, fontSize = 12.sp)
+                                BudgieText(name, color = Ink, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
+                                BudgieText(url, color = Accent, fontSize = 12.sp, lineHeight = 16.sp)
                             }
                         }
                     }
@@ -1091,7 +1091,7 @@ private fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showLibrariesDialog = false }) {
-                    TypewriterText("Close", color = Accent, fontWeight = FontWeight.Bold)
+                    BudgieText("Close", color = Accent, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = Paper,
@@ -1108,10 +1108,10 @@ private fun SettingsScreen(
 
         AlertDialog(
             onDismissRequest = { if (!isSubmitting) showFeedbackDialog = false },
-            title = { TypewriterText("Send technical feedback", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) },
+            title = { BudgieText("Send technical feedback", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    TypewriterText("Report a bug, issue, or general feedback directly to our development team.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp)
+                    BudgieText("Report a bug, issue, or general feedback directly to our development team.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp)
 
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         listOf("Bug", "Issue", "Feedback").forEach { option ->
@@ -1124,7 +1124,7 @@ private fun SettingsScreen(
                                     onClick = { type = option },
                                     colors = RadioButtonDefaults.colors(selectedColor = Accent, unselectedColor = Muted)
                                 )
-                                TypewriterText(option, color = Ink, fontSize = 14.sp)
+                                BudgieText(option, color = Ink, fontSize = 14.sp, lineHeight = 20.sp)
                             }
                         }
                     }
@@ -1132,7 +1132,7 @@ private fun SettingsScreen(
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
-                        label = { TypewriterText("Title", color = Muted, fontSize = 12.sp) },
+                        label = { BudgieText("Title", color = Muted, fontSize = 12.sp, lineHeight = 16.sp) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Accent,
@@ -1146,7 +1146,7 @@ private fun SettingsScreen(
                     OutlinedTextField(
                         value = content,
                         onValueChange = { content = it },
-                        label = { TypewriterText("Description / Content", color = Muted, fontSize = 12.sp) },
+                        label = { BudgieText("Description / Content", color = Muted, fontSize = 12.sp, lineHeight = 16.sp) },
                         minLines = 3,
                         maxLines = 5,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1159,10 +1159,11 @@ private fun SettingsScreen(
                     )
 
                     if (submitStatus != null) {
-                        TypewriterText(
+                        BudgieText(
                             text = submitStatus!!,
                             color = if (submitStatus!!.startsWith("Error") || submitStatus!!.startsWith("Please")) Color(0xFFE53935) else Accent,
                             fontSize = 13.sp,
+                            lineHeight = 18.sp,
                             fontWeight = FontWeight.Medium,
                         )
                     }
@@ -1200,12 +1201,12 @@ private fun SettingsScreen(
                     enabled = !isSubmitting,
                     colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White)
                 ) {
-                    TypewriterText(if (isSubmitting) "Sending..." else "Send", color = Color.White, fontWeight = FontWeight.Bold)
+                    BudgieText(if (isSubmitting) "Sending..." else "Send", color = Color.White, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showFeedbackDialog = false }, enabled = !isSubmitting) {
-                    TypewriterText("Cancel", color = Muted)
+                    BudgieText("Cancel", color = Muted, fontSize = 14.sp, lineHeight = 20.sp)
                 }
             },
             containerColor = Paper,
@@ -1227,8 +1228,8 @@ private fun SettingsRow(
                 .padding(horizontal = 18.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            TypewriterText(description, color = Muted, fontSize = 18.sp, lineHeight = 25.sp, maxLines = 3)
+            BudgieText(title, color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            BudgieText(description, color = Muted, fontSize = 15.sp, lineHeight = 22.sp, maxLines = 3)
         }
         HorizontalDivider(color = Accent, thickness = 1.dp)
     }
@@ -1250,8 +1251,8 @@ private fun SettingsSwitchRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                TypewriterText(description, color = Muted, fontSize = 18.sp, lineHeight = 25.sp, maxLines = 4)
+                BudgieText(title, color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                BudgieText(description, color = Muted, fontSize = 15.sp, lineHeight = 22.sp, maxLines = 4)
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
@@ -1273,15 +1274,15 @@ private fun SettingsChoiceRow(
                 .padding(horizontal = 18.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            TypewriterText(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            TypewriterText(description, color = Muted, fontSize = 18.sp, lineHeight = 25.sp, maxLines = 3)
-            TypewriterText(value, color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            BudgieText(title, color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            BudgieText(description, color = Muted, fontSize = 15.sp, lineHeight = 22.sp, maxLines = 3)
+            BudgieText(value, color = Accent, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(options) { option ->
                     val selected = option.first == value
                     AssistChip(
                         onClick = option.second,
-                        label = { Text(option.first, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        label = { Text(option.first, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         shape = RoundedCornerShape(6.dp),
                         colors = AssistChipDefaults.assistChipColors(
                             containerColor = if (selected) Accent else SurfaceRaised,
@@ -1311,8 +1312,8 @@ private fun VersionFooter() {
         BudgieMark()
         Spacer(Modifier.size(14.dp))
         Column {
-            TypewriterText("Version", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            TypewriterText(context.appVersionText(), color = Ink, fontSize = 16.sp, maxLines = 1)
+            BudgieText("Version", color = Ink, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            BudgieText(context.appVersionText(), color = Ink, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1)
         }
     }
 }
@@ -1362,6 +1363,29 @@ private fun SkeletonBlock(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun BudgieText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Ink,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontWeight: FontWeight? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Ellipsis,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        color = color,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
+        lineHeight = lineHeight,
+        maxLines = maxLines,
+        overflow = overflow,
+    )
+}
+
+@Composable
 private fun TypewriterText(
     text: String,
     modifier: Modifier = Modifier,
@@ -1406,16 +1430,16 @@ private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier =
         ) {
             Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Alert, modifier = Modifier.size(40.dp))
             Spacer(Modifier.height(14.dp))
-            TypewriterText("Could not load the feed", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            BudgieText("Could not load the feed", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Spacer(Modifier.height(8.dp))
-            TypewriterText(message, color = Muted, lineHeight = 20.sp, maxLines = 3)
+            BudgieText(message, color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 3)
             Spacer(Modifier.height(18.dp))
             Button(
                 onClick = onRetry,
                 shape = RoundedCornerShape(6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
             ) {
-                Text("Try again")
+                Text("Try again", fontSize = 14.sp, lineHeight = 20.sp)
             }
         }
         }
@@ -1525,10 +1549,11 @@ private fun SectionMenu(
 
 @Composable
 private fun FeedSourceNote(selectedSource: SourceFilter) {
-    TypewriterText(
+    BudgieText(
         selectedSource.sourceNote(),
         color = Muted,
         fontSize = 12.sp,
+        lineHeight = 16.sp,
         modifier = Modifier.padding(horizontal = 2.dp),
     )
 }
@@ -1554,8 +1579,8 @@ private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter
             }
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.fillMaxWidth()) {
-                    TypewriterText("Coverage Lens", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    TypewriterText(
+                    BudgieText("Coverage Lens", color = Ink, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    BudgieText(
                         "Compare source framing before opening a story.",
                         color = Muted,
                         fontSize = 12.sp,
@@ -1581,8 +1606,8 @@ private fun MetricTile(label: String, value: String, modifier: Modifier = Modifi
             .background(AccentSoft, RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
-        TypewriterText(value, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1)
-        TypewriterText(label, color = Muted, fontSize = 12.sp, maxLines = 1)
+        BudgieText(value, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, lineHeight = 24.sp, maxLines = 1)
+        BudgieText(label, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
     }
 }
 
@@ -1597,8 +1622,8 @@ private fun EmptySection(section: NewsSection) {
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(28.dp))
-            TypewriterText(section.emptyText, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 2)
-            TypewriterText("Try refresh, or switch to another menu section.", color = Muted, lineHeight = 20.sp, maxLines = 2)
+            BudgieText(section.emptyText, color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            BudgieText("Try refresh, or switch to another menu section.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2)
         }
     }
 }
@@ -1624,10 +1649,10 @@ private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (F
             Column {
                 RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.72f))
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TypewriterText("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    TypewriterText(item.title, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp, maxLines = 4)
+                    BudgieText("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    BudgieText(item.title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp, maxLines = 4)
                     if (item.description.isNotBlank()) {
-                        TypewriterText(item.description, color = Muted, maxLines = 3, lineHeight = 20.sp)
+                        BudgieText(item.description, color = Muted, fontSize = 14.sp, maxLines = 3, lineHeight = 21.sp)
                     }
                     CoverageRow(item)
                     StoryMeta(item)
@@ -1657,9 +1682,9 @@ private fun StoryCard(item: FeedItem, selected: Boolean, onStorySelected: (FeedI
             Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 RemoteImage(item.imageUrl, Modifier.size(92.dp).clip(RoundedCornerShape(6.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TypewriterText(item.title, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 3, lineHeight = 20.sp)
+                    BudgieText(item.title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, lineHeight = 23.sp)
                     if (item.description.isNotBlank()) {
-                        TypewriterText(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, lineHeight = 18.sp)
+                        BudgieText(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, lineHeight = 19.sp)
                     }
                     CoverageRow(item)
                     StoryMeta(item)
@@ -1692,9 +1717,9 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         SourcePill(item.source.shortSourceName(), active = true)
-                        TypewriterText(item.publishedAt, color = Muted, fontSize = 12.sp, maxLines = 1)
+                        BudgieText(item.publishedAt, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
                     }
-                    TypewriterText(item.title, color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp)
+                    BudgieText(item.title, color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 33.sp)
                     QuickRead(item)
                     CoverageRow(item)
                     Button(
@@ -1705,7 +1730,7 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.size(8.dp))
-                        Text("Read official source")
+                        Text("Read official source", fontSize = 14.sp, lineHeight = 20.sp)
                     }
                 }
             }
@@ -1732,8 +1757,8 @@ private fun DetailPlaceholder() {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(36.dp))
-                TypewriterText("Select a story", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                TypewriterText("Article details will stay open beside the feed on larger screens.", color = Muted, lineHeight = 20.sp, maxLines = 3)
+                BudgieText("Select a story", color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                BudgieText("Article details will stay open beside the feed on larger screens.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 3)
             }
         }
     }
@@ -1742,11 +1767,11 @@ private fun DetailPlaceholder() {
 @Composable
 private fun QuickRead(item: FeedItem) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        TypewriterText("Quick read", color = Accent, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        BudgieText("Quick read", color = Accent, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         item.quickReadPoints().forEach { point ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("-", color = Muted, lineHeight = 21.sp)
-                TypewriterText(point, color = Muted, lineHeight = 21.sp, modifier = Modifier.weight(1f), maxLines = 5)
+                Text("-", color = Muted, fontSize = 14.sp, lineHeight = 21.sp)
+                BudgieText(point, color = Muted, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f), maxLines = 5)
             }
         }
     }
@@ -1768,6 +1793,7 @@ private fun CoverageRow(item: FeedItem) {
             "Covered by ${item.coverageSources.size}/${FeedSources.size}",
             color = Accent,
             fontSize = 12.sp,
+            lineHeight = 16.sp,
             fontWeight = FontWeight.SemiBold,
         )
         item.coverageSources.take(2).forEach { source ->
@@ -1783,6 +1809,7 @@ private fun SourcePill(label: String, active: Boolean) {
         label,
         color = textColor,
         fontSize = 11.sp,
+        lineHeight = 15.sp,
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -1806,10 +1833,11 @@ private fun brandColors(label: String): Pair<Color, Color> = when {
 
 @Composable
 private fun StoryMeta(item: FeedItem) {
-    TypewriterText(
+    BudgieText(
         listOf(item.source, item.publishedAt).filter { it.isNotBlank() }.joinToString("  |  "),
         color = Muted,
         fontSize = 12.sp,
+        lineHeight = 16.sp,
         maxLines = 1,
     )
 }
@@ -2179,7 +2207,11 @@ private fun XmlPullParser.attributeValue(name: String): String? {
 }
 
 private fun String.stripHtml(): String =
-    Html.fromHtml(this, Html.FROM_HTML_MODE_LEGACY).toString().trim()
+    Html.fromHtml(this, Html.FROM_HTML_MODE_LEGACY)
+        .toString()
+        .replace(Regex("\\r\\n|\\r|\\n"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
 private fun String.firstImageUrl(): String? {
     val match = Regex("""<img[^>]+src=['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(this)
@@ -2213,7 +2245,7 @@ private fun android.content.Context.openUrl(url: String) {
 
 private fun Context.appVersionText(): String {
     val packageInfo = packageManager.getPackageInfo(packageName, 0)
-    return packageInfo.versionName ?: "0.0.14-alpha"
+    return packageInfo.versionName ?: "0.0.15-alpha"
 }
 
 private fun sendDiscordWebhook(
