@@ -362,10 +362,35 @@ internal object BudgieNotifications {
     const val EXTRA_ARTICLE_ID = "com.budgienews.app.extra.ARTICLE_ID"
     const val EXTRA_ARTICLE_CATEGORY = "com.budgienews.app.extra.ARTICLE_CATEGORY"
 
-    private fun notifyFor(context: Context, section: NewsSection, item: FeedItem, articleId: String = item.link) {
+    fun notifyNewArticle(
+        context: Context,
+        item: FeedItem,
+        section: NewsSection = NewsSection.HEADLINES,
+        isPush: Boolean = false,
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
+
+        val settings = BudgiePrefs.load(context)
+        val enabled = when (section) {
+            NewsSection.BREAKING -> settings.breakingNotificationsEnabled
+            NewsSection.IMPORTANT -> settings.importantNotificationsEnabled
+            NewsSection.HEADLINES -> settings.headlinesNotificationsEnabled
+        }
+        if (!enabled) return
+
+        val articleId = item.link.ifBlank { item.id }.ifBlank { item.title }
+        if (articleId.isBlank()) return
+
+        val prefs = context.getSharedPreferences("budgie_news_settings", Context.MODE_PRIVATE)
+        val key = when (section) {
+            NewsSection.BREAKING -> "last_breaking_link"
+            NewsSection.IMPORTANT -> "last_important_link"
+            NewsSection.HEADLINES -> "last_headlines_link"
+        }
+        if (prefs.getString(key, "") == articleId && !isPush) return
+        prefs.edit().putString(key, articleId).apply()
 
         val channelId = when (section) {
             NewsSection.BREAKING -> BREAKING_CHANNEL_ID
@@ -390,35 +415,11 @@ internal object BudgieNotifications {
             .setStyle(NotificationCompat.BigTextStyle().bigText(item.title))
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .setPriority(if (section == NewsSection.IMPORTANT) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(if (section == NewsSection.IMPORTANT || section == NewsSection.BREAKING) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .build()
 
         context.getSystemService(NotificationManager::class.java)
-            .notify(section.ordinal + item.link.hashCode(), notification)
-    }
-
-    fun notifyForPush(
-        context: Context,
-        articleId: String,
-        category: String,
-        title: String,
-        source: String,
-    ) {
-        val section = runCatching { NewsSection.valueOf(category.uppercase()) }.getOrDefault(NewsSection.HEADLINES)
-        notifyFor(
-            context = context,
-            section = section,
-            item = FeedItem(
-                id = articleId,
-                title = title.ifBlank { "${section.label} story" },
-                description = "",
-                link = articleId,
-                source = source.ifBlank { "Budgie News" },
-                publishedAt = "",
-                imageUrl = null,
-            ),
-            articleId = articleId,
-        )
+            .notify(section.ordinal + articleId.hashCode(), notification)
     }
 }
 
@@ -473,24 +474,6 @@ internal object BudgiePrefs {
 
     suspend fun saveAndSync(context: Context, settings: AppSettings) {
         save(context, settings)
-    }
-
-    fun shouldNotify(context: Context, section: NewsSection, item: FeedItem, settings: AppSettings): Boolean {
-        val enabled = when (section) {
-            NewsSection.BREAKING -> settings.breakingNotificationsEnabled
-            NewsSection.IMPORTANT -> settings.importantNotificationsEnabled
-            NewsSection.HEADLINES -> settings.headlinesNotificationsEnabled
-        }
-        if (!enabled || item.link.isBlank()) return false
-        val key = when (section) {
-            NewsSection.BREAKING -> KEY_LAST_BREAKING
-            NewsSection.IMPORTANT -> KEY_LAST_IMPORTANT
-            NewsSection.HEADLINES -> "last_headlines_link"
-        }
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getString(key, "") == item.link) return false
-        prefs.edit().putString(key, item.link).apply()
-        return true
     }
 }
 
@@ -555,6 +538,10 @@ internal object BudgieAccountApi {
                     .orEmpty()
                 articles.forEach { article ->
                     BudgieArticleDatabase.get(context).upsertArticle(article)
+                    val section = runCatching { NewsSection.valueOf(article.category.uppercase()) }.getOrDefault(NewsSection.HEADLINES)
+                    if (section == NewsSection.BREAKING || section == NewsSection.IMPORTANT) {
+                        BudgieNotifications.notifyNewArticle(context, article.toFeedItem(), section)
+                    }
                 }
             }
     }
@@ -832,7 +819,7 @@ private fun NewsApp() {
                         Spacer(Modifier.size(10.dp))
                         Column {
                             TypewriterText("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            BudgieText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                            TypewriterText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
                         }
                     }
                 },
@@ -1430,9 +1417,9 @@ private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier =
         ) {
             Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Alert, modifier = Modifier.size(40.dp))
             Spacer(Modifier.height(14.dp))
-            BudgieText("Could not load the feed", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            TypewriterText("Could not load the feed", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Spacer(Modifier.height(8.dp))
-            BudgieText(message, color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 3)
+            TypewriterText(message, color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 3)
             Spacer(Modifier.height(18.dp))
             Button(
                 onClick = onRetry,
@@ -1549,7 +1536,7 @@ private fun SectionMenu(
 
 @Composable
 private fun FeedSourceNote(selectedSource: SourceFilter) {
-    BudgieText(
+    TypewriterText(
         selectedSource.sourceNote(),
         color = Muted,
         fontSize = 12.sp,
@@ -1579,8 +1566,8 @@ private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter
             }
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.fillMaxWidth()) {
-                    BudgieText("Coverage Lens", color = Ink, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    BudgieText(
+                    TypewriterText("Coverage Lens", color = Ink, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    TypewriterText(
                         "Compare source framing before opening a story.",
                         color = Muted,
                         fontSize = 12.sp,
@@ -1606,8 +1593,8 @@ private fun MetricTile(label: String, value: String, modifier: Modifier = Modifi
             .background(AccentSoft, RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
-        BudgieText(value, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, lineHeight = 24.sp, maxLines = 1)
-        BudgieText(label, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+        TypewriterText(value, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, lineHeight = 24.sp, maxLines = 1)
+        TypewriterText(label, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
     }
 }
 
@@ -1622,8 +1609,8 @@ private fun EmptySection(section: NewsSection) {
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(28.dp))
-            BudgieText(section.emptyText, color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-            BudgieText("Try refresh, or switch to another menu section.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2)
+            TypewriterText(section.emptyText, color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            TypewriterText("Try refresh, or switch to another menu section.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2)
         }
     }
 }
@@ -1649,10 +1636,10 @@ private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (F
             Column {
                 RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.72f))
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BudgieText("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    BudgieText(item.title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp, maxLines = 4)
+                    TypewriterText("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    TypewriterText(item.title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp, maxLines = 4)
                     if (item.description.isNotBlank()) {
-                        BudgieText(item.description, color = Muted, fontSize = 14.sp, maxLines = 3, lineHeight = 21.sp)
+                        TypewriterText(item.description, color = Muted, fontSize = 14.sp, maxLines = 3, lineHeight = 21.sp)
                     }
                     CoverageRow(item)
                     StoryMeta(item)
@@ -1682,9 +1669,9 @@ private fun StoryCard(item: FeedItem, selected: Boolean, onStorySelected: (FeedI
             Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 RemoteImage(item.imageUrl, Modifier.size(92.dp).clip(RoundedCornerShape(6.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    BudgieText(item.title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, lineHeight = 23.sp)
+                    TypewriterText(item.title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, lineHeight = 23.sp)
                     if (item.description.isNotBlank()) {
-                        BudgieText(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, lineHeight = 19.sp)
+                        TypewriterText(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, lineHeight = 19.sp)
                     }
                     CoverageRow(item)
                     StoryMeta(item)
@@ -1717,9 +1704,9 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         SourcePill(item.source.shortSourceName(), active = true)
-                        BudgieText(item.publishedAt, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                        TypewriterText(item.publishedAt, color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
                     }
-                    BudgieText(item.title, color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 33.sp)
+                    TypewriterText(item.title, color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 33.sp)
                     QuickRead(item)
                     CoverageRow(item)
                     Button(
@@ -1757,8 +1744,8 @@ private fun DetailPlaceholder() {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(36.dp))
-                BudgieText("Select a story", color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                BudgieText("Article details will stay open beside the feed on larger screens.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 3)
+                TypewriterText("Select a story", color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                TypewriterText("Article details will stay open beside the feed on larger screens.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 3)
             }
         }
     }
@@ -1767,11 +1754,11 @@ private fun DetailPlaceholder() {
 @Composable
 private fun QuickRead(item: FeedItem) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        BudgieText("Quick read", color = Accent, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        TypewriterText("Quick read", color = Accent, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         item.quickReadPoints().forEach { point ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("-", color = Muted, fontSize = 14.sp, lineHeight = 21.sp)
-                BudgieText(point, color = Muted, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f), maxLines = 5)
+                TypewriterText(point, color = Muted, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f), maxLines = 5)
             }
         }
     }
@@ -1833,7 +1820,7 @@ private fun brandColors(label: String): Pair<Color, Color> = when {
 
 @Composable
 private fun StoryMeta(item: FeedItem) {
-    BudgieText(
+    TypewriterText(
         listOf(item.source, item.publishedAt).filter { it.isNotBlank() }.joinToString("  |  "),
         color = Muted,
         fontSize = 12.sp,
@@ -1932,6 +1919,9 @@ private suspend fun fetchFeeds(
         filteredItems
     }.fold(
         onSuccess = { items ->
+            items.firstOrNull()?.let { topItem ->
+                BudgieNotifications.notifyNewArticle(context, topItem, section)
+            }
             FeedState.Ready(items)
         },
         onFailure = {
