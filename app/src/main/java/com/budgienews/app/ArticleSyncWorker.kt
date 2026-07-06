@@ -29,7 +29,9 @@ class ArticleSyncWorker(
 
         runCatching {
             val article = fetchArticle(articleId, category)
-            BudgieArticleDatabase.get(applicationContext).upsertArticle(article)
+            if (isFreeNewsSource(article.source)) {
+                BudgieArticleDatabase.get(applicationContext).upsertArticle(article)
+            }
         }.fold(
             onSuccess = { Result.success() },
             onFailure = { error ->

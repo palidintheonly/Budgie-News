@@ -156,10 +156,7 @@ private val FeedSources = listOf(
     FeedSource("Sky Politics", "https://feeds.skynews.com/feeds/rss/politics.xml"),
     FeedSource("Guardian UK", "https://www.theguardian.com/uk/rss"),
     FeedSource("Guardian Politics", "https://www.theguardian.com/politics/rss"),
-    FeedSource("Independent UK", "https://www.independent.co.uk/news/uk/rss"),
-    FeedSource("Daily Mail News", "https://www.dailymail.co.uk/news/index.rss"),
     FeedSource("The Sun News", "https://www.thesun.co.uk/news/feed/"),
-    FeedSource("Financial Times UK", "https://www.ft.com/uk?format=rss"),
 )
 
 private val UkLocationOptions = listOf(
@@ -538,13 +535,15 @@ internal object BudgieAccountApi {
                         )
                     }
                     .orEmpty()
-                articles.forEach { article ->
-                    BudgieArticleDatabase.get(context).upsertArticle(article)
-                    val section = runCatching { NewsSection.valueOf(article.category.uppercase()) }.getOrDefault(NewsSection.HEADLINES)
-                    if (section == NewsSection.BREAKING || section == NewsSection.IMPORTANT) {
-                        BudgieNotifications.notifyNewArticle(context, article.toFeedItem(), section)
+                articles
+                    .filter { isFreeNewsSource(it.source) }
+                    .forEach { article ->
+                        BudgieArticleDatabase.get(context).upsertArticle(article)
+                        val section = runCatching { NewsSection.valueOf(article.category.uppercase()) }.getOrDefault(NewsSection.HEADLINES)
+                        if (section == NewsSection.BREAKING || section == NewsSection.IMPORTANT) {
+                            BudgieNotifications.notifyNewArticle(context, article.toFeedItem(), section)
+                        }
                     }
-                }
             }
     }
 
@@ -715,10 +714,7 @@ internal enum class SourceFilter(val label: String, val sourceName: String?) {
     SKY_POLITICS("Sky Pol", "Sky Politics"),
     GUARDIAN("Guardian", "Guardian UK"),
     GUARDIAN_POLITICS("Guard Pol", "Guardian Politics"),
-    INDEPENDENT("Indy", "Independent UK"),
-    DAILY_MAIL("Mail", "Daily Mail News"),
     SUN("Sun", "The Sun News"),
-    FT("FT", "Financial Times UK"),
 }
 
 internal enum class NewsSection(
@@ -1813,10 +1809,7 @@ private fun brandColors(label: String): Pair<Color, Color> = when {
     label.contains("BBC", ignoreCase = true) -> Color(0xFFB80000) to Ink
     label.contains("Sky", ignoreCase = true) -> Color(0xFF0015A8) to Ink
     label.contains("Guard", ignoreCase = true) -> Color(0xFF052962) to Ink
-    label.contains("Indy", ignoreCase = true) -> Color(0xFFE31B22) to Ink
-    label.contains("Mail", ignoreCase = true) -> Color(0xFF004D99) to Ink
     label.contains("Sun", ignoreCase = true) -> Color(0xFFED1C24) to Ink
-    label.contains("FT", ignoreCase = true) -> Color(0xFFF3D5B9) to Paper
     else -> Accent to Ink
 }
 
@@ -1892,6 +1885,7 @@ private suspend fun fetchFeeds(
         val localItems = BudgieArticleDatabase.get(context)
             .recentArticles()
             .map { it.toFeedItem() }
+            .filter { isFreeNewsSource(it.source) }
             .filter { sourceFilter.sourceName == null || it.source == sourceFilter.sourceName }
         val loadedItems = sources
             .map { source ->
@@ -1906,6 +1900,7 @@ private suspend fun fetchFeeds(
             loadedItems
         } else {
             BudgieCache.load(context)
+                .filter { isFreeNewsSource(it.source) }
                 .filter { item -> sourceFilter.sourceName == null || item.source == sourceFilter.sourceName }
                 .distinctBy { it.link.ifBlank { it.title } }
         }
@@ -1931,6 +1926,11 @@ private suspend fun fetchFeeds(
             FeedState.Error(it.message ?: "Unexpected feed error")
         },
     )
+}
+
+internal fun isFreeNewsSource(source: String): Boolean {
+    val paywalled = listOf("Financial Times", "FT", "Independent", "Indy", "Daily Mail", "Mail Online", "Mail+", "Telegraph", "Times")
+    return paywalled.none { source.contains(it, ignoreCase = true) }
 }
 
 internal fun LocalArticle.toFeedItem(): FeedItem =
@@ -2136,10 +2136,7 @@ private fun String.shortSourceName(): String = when {
     contains("BBC", ignoreCase = true) -> "BBC"
     contains("Sky", ignoreCase = true) -> "Sky"
     contains("Guardian", ignoreCase = true) -> "Guardian"
-    contains("Independent", ignoreCase = true) -> "Indy"
-    contains("Daily Mail", ignoreCase = true) -> "Mail"
     contains("Sun", ignoreCase = true) -> "Sun"
-    contains("Financial Times", ignoreCase = true) -> "FT"
     else -> this
 }
 

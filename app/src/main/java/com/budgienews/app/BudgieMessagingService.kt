@@ -37,6 +37,7 @@ class BudgieMessagingService : FirebaseMessagingService() {
         val source = message.data["source"]
             ?: message.data["outlet"]
             ?: "Budgie News"
+        if (!isFreeNewsSource(source)) return
 
         val link = message.data["link"]
             ?: message.data["url"]

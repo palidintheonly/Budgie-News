@@ -56,6 +56,7 @@ class FeedNotificationWorker(
                     category = document.getString("category") ?: NewsSection.HEADLINES.label,
                     isRead = document.getBoolean("isRead") == true,
                 )
+                if (!isFreeNewsSource(article.source)) continue
                 db.upsertArticle(article)
 
                 val section = runCatching { NewsSection.valueOf(article.category.uppercase()) }.getOrDefault(NewsSection.HEADLINES)
