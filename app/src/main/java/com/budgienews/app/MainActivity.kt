@@ -392,6 +392,8 @@ internal object BudgieNotifications {
         if (prefs.getString(key, "") == articleId && !isPush) return
         prefs.edit().putString(key, articleId).apply()
 
+        if (AppVisibility.isForeground) return
+
         val channelId = when (section) {
             NewsSection.BREAKING -> BREAKING_CHANNEL_ID
             NewsSection.IMPORTANT -> IMPORTANT_CHANNEL_ID
@@ -551,7 +553,7 @@ internal object BudgieAccountApi {
 }
 
 internal data class AppUpdateConfig(
-    val minRequiredVersion: String = "0.0.15-alpha",
+    val minRequiredVersion: String = "0.1.0-beta",
     val updateMessage: String = "An important update for Budgie News is available. Please update your app to continue reading news.",
     val updateUrl: String = "https://budgienews.com",
     val isOutdated: Boolean = false,
@@ -579,7 +581,7 @@ internal object BudgieVersionCheck {
                                 .document("version")
                                 .set(
                                     mapOf(
-                                        "minRequiredVersion" to "0.0.15-alpha",
+                                        "minRequiredVersion" to "0.1.0-beta",
                                         "updateMessage" to "An important update for Budgie News is available. Please update your app to continue reading news.",
                                         "updateUrl" to "https://budgienews.com",
                                         "forceLock" to false,

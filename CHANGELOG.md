@@ -1,10 +1,6 @@
 # Changelog
 
-## 0.0.15-alpha (Pre-Beta Polish Release)
+## 0.1.0-beta (Beta Release & Background Push Notification Fix)
 
-- Achieved pre-beta level UI polish, readability, and responsiveness across the entire application, ensuring seamless performance and legibility across all form factors and Android API levels (Android 8.1.0 through Android 17).
-- Fixed text readability and formatting by establishing proportional font size and line height ratios across news cards, lists, detail views, and settings, eliminating line overlap under system font scaling.
-- Restored the signature retro typewriter text animation on the main page (news feed cards, lead stories, section headers, and article details), while maintaining instant text rendering exclusively in Settings and Dialogs to prevent lag during preference changes.
-- Completely rebuilt the push notification and live alert engine (`BudgieNotifications`). Added robust multi-key payload parsing in Firebase Messaging Service, integrated real-time notification triggers into live Firestore feed syncing and RSS loading, and implemented preference-aware deduplication.
-- Enhanced HTML stripping and whitespace normalization in RSS feed descriptions and titles to prevent awkward gaps, line wraps, and uncleaned formatting.
-
+- **Foreground Notification Suppression**: Implemented activity lifecycle tracking (`AppVisibility`) to completely suppress system tray notifications while the user is actively viewing the app. Clicking tabs or opening news feeds no longer triggers redundant, pointless status bar notifications.
+- **Background Periodic News Worker**: Replaced startup worker cancellation with `FeedNotificationWorker`, scheduled via WorkManager to run periodically in the background every 15 minutes. Users now reliably receive notifications for new Breaking and Important news when the app is closed or in the background without needing to open the app.
