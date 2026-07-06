@@ -70,6 +70,7 @@ class BudgieMessagingService : FirebaseMessagingService() {
         )
     }
 
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onNewToken(token: String) {
         FirebaseCrashlytics.getInstance().setCustomKey("fcm_token_ready", token.isNotBlank())
         if (token.isNotBlank()) {

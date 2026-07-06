@@ -1933,7 +1933,7 @@ private suspend fun fetchFeeds(
     )
 }
 
-private fun LocalArticle.toFeedItem(): FeedItem =
+internal fun LocalArticle.toFeedItem(): FeedItem =
     FeedItem(
         id = articleId,
         title = title,

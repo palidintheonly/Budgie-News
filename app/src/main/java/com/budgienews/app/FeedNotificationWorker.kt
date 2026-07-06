@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -23,6 +25,9 @@ class FeedNotificationWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // Always reschedule the next 3-minute check to maintain near-live background checking
+        scheduleNextOneTime(applicationContext)
+
         // Do not trigger system notifications if the user is actively viewing the app
         if (AppVisibility.isForeground) return@withContext Result.success()
 
@@ -66,10 +71,11 @@ class FeedNotificationWorker(
     }
 
     companion object {
-        const val WORK_NAME = "budgie-feed-notifications"
+        const val WORK_NAME_PERIODIC = "budgie-feed-notifications-periodic"
+        const val WORK_NAME_ONE_TIME = "budgie-feed-notifications-live"
 
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<FeedNotificationWorker>(15, TimeUnit.MINUTES)
+            val periodicRequest = PeriodicWorkRequestBuilder<FeedNotificationWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -78,9 +84,28 @@ class FeedNotificationWorker(
                 .build()
 
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                WORK_NAME,
+                WORK_NAME_PERIODIC,
                 ExistingPeriodicWorkPolicy.KEEP,
-                request
+                periodicRequest
+            )
+
+            scheduleNextOneTime(context)
+        }
+
+        fun scheduleNextOneTime(context: Context) {
+            val oneTimeRequest = OneTimeWorkRequestBuilder<FeedNotificationWorker>()
+                .setInitialDelay(3, TimeUnit.MINUTES)
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_NAME_ONE_TIME,
+                ExistingWorkPolicy.REPLACE,
+                oneTimeRequest
             )
         }
     }
