@@ -25,6 +25,9 @@ exports.pushArticleCreated = onDocumentCreated("articles/{articleId}", async (ev
   const isHeadlines = category.toLowerCase() === "headlines";
   if (!isBreaking && !isImportant && !isHeadlines) return;
 
+  const paywalled = ["Financial Times", "FT", "Independent", "Indy", "Daily Mail", "Mail Online", "Mail+", "Telegraph", "Times"];
+  if (article.source && paywalled.some((p) => String(article.source).toLowerCase().includes(p.toLowerCase()))) return;
+
   const tokensSnapshot = await db.collection("deviceTokens").limit(500).get();
   const tokens = [];
 
@@ -91,7 +94,7 @@ exports.initVersionConfig = onRequest(async (req, res) => {
     const doc = await configRef.get();
     if (!doc.exists) {
       await configRef.set({
-        minRequiredVersion: "0.0.14-alpha",
+        minRequiredVersion: "0.1.0-beta",
         updateMessage: "An important update for Budgie News is available. Please update your app to continue reading news.",
         updateUrl: "https://budgienews.com",
         forceLock: false,

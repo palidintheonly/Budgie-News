@@ -11,3 +11,25 @@ app/google-services.json
 keystore.properties
 keystore/*.jks
 keystore/*.keystore
+
+# Sensitive credentials and keys (hide from general public)
+*.pem
+*.key
+*.pkcs12
+*.p12
+serviceAccountKey.json
+*-adminsdk-*.json
+*secret*.json
+.env
+.env.*
+!.env.example
+
+# Node / Backend dependencies and logs
+node_modules/
+functions/node_modules/
+server/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+*.log
