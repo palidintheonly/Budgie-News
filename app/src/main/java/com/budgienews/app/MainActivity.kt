@@ -150,7 +150,7 @@ private val Accent = Color(0xFF3F3F46)
 private val AccentSoft = Color(0xFF27272A)
 private val Alert = Color(0xFFD4D4D8)
 
-private val FeedSources = listOf(
+internal val FeedSources = listOf(
     FeedSource("BBC UK", "https://feeds.bbci.co.uk/news/uk/rss.xml"),
     FeedSource("Sky News UK", "https://feeds.skynews.com/feeds/rss/uk.xml"),
     FeedSource("Sky Politics", "https://feeds.skynews.com/feeds/rss/politics.xml"),
@@ -540,10 +540,6 @@ internal object BudgieAccountApi {
                     .filter { isFreeNewsSource(it.source) }
                     .forEach { article ->
                         BudgieArticleDatabase.get(context).upsertArticle(article)
-                        val section = runCatching { NewsSection.valueOf(article.category.uppercase()) }.getOrDefault(NewsSection.HEADLINES)
-                        if (section == NewsSection.BREAKING || section == NewsSection.IMPORTANT) {
-                            BudgieNotifications.notifyNewArticle(context, article.toFeedItem(), section)
-                        }
                     }
             }
     }
@@ -1917,9 +1913,6 @@ private suspend fun fetchFeeds(
         filteredItems
     }.fold(
         onSuccess = { items ->
-            items.firstOrNull()?.let { topItem ->
-                BudgieNotifications.notifyNewArticle(context, topItem, section)
-            }
             FeedState.Ready(items)
         },
         onFailure = {
@@ -1985,7 +1978,7 @@ private fun List<FeedItem>.withCoverageContext(): List<FeedItem> = map { item ->
     item.copy(coverageSources = relatedSources.ifEmpty { listOf(item.source) })
 }
 
-private fun fetchFeed(source: FeedSource): List<FeedItem> {
+internal fun fetchFeed(source: FeedSource): List<FeedItem> {
     val connection = (URL(source.url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 10_000
         readTimeout = 15_000
@@ -2077,7 +2070,7 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
     )
 }
 
-private fun List<FeedItem>.filterFor(section: NewsSection): List<FeedItem> = when (section) {
+internal fun List<FeedItem>.filterFor(section: NewsSection): List<FeedItem> = when (section) {
     NewsSection.HEADLINES -> this
     NewsSection.BREAKING -> filter { item ->
         item.matchesAny(

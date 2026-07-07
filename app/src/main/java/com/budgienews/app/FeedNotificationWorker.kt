@@ -32,6 +32,28 @@ class FeedNotificationWorker(
         if (AppVisibility.isForeground) return@withContext Result.success()
 
         runCatching {
+            // 1. Fetch live news feeds from BBC, Sky, Guardian, and Sun while user is out of the app
+            val liveItems = FeedSources
+                .map { source ->
+                    runCatching { fetchFeed(source).take(15) }
+                        .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                        .getOrDefault(emptyList())
+                }
+                .flatten()
+                .filter { isFreeNewsSource(it.source) }
+                .distinctBy { it.link.ifBlank { it.title } }
+
+            val breakingLive = liveItems.filterFor(NewsSection.BREAKING)
+            breakingLive.firstOrNull()?.let { topBreaking ->
+                BudgieNotifications.notifyNewArticle(applicationContext, topBreaking, NewsSection.BREAKING)
+            }
+
+            val importantLive = liveItems.filterFor(NewsSection.IMPORTANT)
+            importantLive.firstOrNull()?.let { topImportant ->
+                BudgieNotifications.notifyNewArticle(applicationContext, topImportant, NewsSection.IMPORTANT)
+            }
+
+            // 2. Also check Firestore articles collection for backend alerts
             val newestAllowed = BudgieTime.minAllowedMillis()
             val snapshot = Firebase.firestore.collection("articles")
                 .whereGreaterThanOrEqualTo("publishedAtMillis", newestAllowed)
