@@ -3,10 +3,12 @@ package com.budgienews.app
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import com.google.android.gms.ads.MobileAds
 
 class BudgieNewsApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        MobileAds.initialize(this) {}
         BudgieNotifications.ensureChannels(this)
         AppVisibility.register(this)
         FeedNotificationWorker.schedule(this)

@@ -56,6 +56,16 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.viewinterop.AndroidView
+import android.view.LayoutInflater
+import android.widget.Button
+import android.widget.ImageView
+import android.widget.TextView
+import com.google.android.gms.ads.AdLoader
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.nativead.NativeAd
+import com.google.android.gms.ads.nativead.NativeAdView
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -1466,8 +1476,11 @@ private fun NewsList(
             item {
                 LeadStory(items.firstOrNull(), selectedSection, onStorySelected)
             }
-            items(items.drop(1)) { item ->
+            itemsIndexed(items.drop(1)) { index, item ->
                 StoryCard(item, selected = item.id == selectedItem?.id, onStorySelected)
+                if ((index + 1) % 6 == 0) {
+                    NativeAdvancedAdCard()
+                }
             }
         }
     }
@@ -1673,6 +1686,89 @@ private fun StoryCard(item: FeedItem, selected: Boolean, onStorySelected: (FeedI
                 }
                 Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
             }
+        }
+    }
+}
+
+@Composable
+private fun NativeAdvancedAdCard(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var nativeAd by remember { mutableStateOf<NativeAd?>(null) }
+    var adFailed by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        val adLoader = AdLoader.Builder(context, "ca-app-pub-7596383212906226/5934663589")
+            .forNativeAd { ad ->
+                nativeAd = ad
+            }
+            .withAdListener(object : com.google.android.gms.ads.AdListener() {
+                override fun onAdFailedToLoad(error: com.google.android.gms.ads.LoadAdError) {
+                    adFailed = true
+                }
+            })
+            .build()
+        adLoader.loadAd(AdRequest.Builder().build())
+
+        onDispose {
+            nativeAd?.destroy()
+        }
+    }
+
+    val currentAd = nativeAd
+    if (currentAd != null && !adFailed) {
+        Card(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(6.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+            border = BorderStroke(1.dp, AccentSoft),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxWidth(),
+                factory = { ctx ->
+                    val adView = LayoutInflater.from(ctx).inflate(R.layout.ad_native_advanced, null) as NativeAdView
+                    adView.headlineView = adView.findViewById(R.id.ad_headline)
+                    adView.bodyView = adView.findViewById(R.id.ad_body)
+                    adView.callToActionView = adView.findViewById(R.id.ad_call_to_action)
+                    adView.iconView = adView.findViewById(R.id.ad_app_icon)
+                    adView.mediaView = adView.findViewById(R.id.ad_media)
+                    adView.advertiserView = adView.findViewById(R.id.ad_advertiser)
+                    adView
+                },
+                update = { adView ->
+                    (adView.headlineView as? TextView)?.text = currentAd.headline
+                    
+                    if (currentAd.body == null) {
+                        adView.bodyView?.visibility = android.view.View.GONE
+                    } else {
+                        adView.bodyView?.visibility = android.view.View.VISIBLE
+                        (adView.bodyView as? TextView)?.text = currentAd.body
+                    }
+
+                    if (currentAd.callToAction == null) {
+                        adView.callToActionView?.visibility = android.view.View.INVISIBLE
+                    } else {
+                        adView.callToActionView?.visibility = android.view.View.VISIBLE
+                        (adView.callToActionView as? Button)?.text = currentAd.callToAction
+                    }
+
+                    if (currentAd.icon == null) {
+                        adView.iconView?.visibility = android.view.View.GONE
+                    } else {
+                        (adView.iconView as? ImageView)?.setImageDrawable(currentAd.icon?.drawable)
+                        adView.iconView?.visibility = android.view.View.VISIBLE
+                    }
+
+                    if (currentAd.advertiser == null) {
+                        adView.advertiserView?.visibility = android.view.View.GONE
+                    } else {
+                        (adView.advertiserView as? TextView)?.text = currentAd.advertiser
+                        adView.advertiserView?.visibility = android.view.View.VISIBLE
+                    }
+
+                    adView.setNativeAd(currentAd)
+                }
+            )
         }
     }
 }

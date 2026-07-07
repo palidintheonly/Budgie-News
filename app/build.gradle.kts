@@ -52,5 +52,6 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.play.services.ads)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
