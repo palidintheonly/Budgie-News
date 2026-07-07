@@ -100,6 +100,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -1040,8 +1041,15 @@ private fun SettingsScreen(
         }
         item {
             SettingsRow(
+                title = "Open Ad Inspector",
+                description = "Launch Google Ad Inspector to test ad delivery without shaking.",
+                onClick = { com.google.android.gms.ads.MobileAds.openAdInspector(context) {} },
+            )
+        }
+        item {
+            SettingsRow(
                 title = "Third party libraries",
-                description = "Firebase, Coil, AndroidX, Kotlin, and Jetpack Compose.",
+                description = "Google AdSense, Google Mobile Ads SDK, Firebase, Coil, AndroidX, Kotlin, and Jetpack Compose.",
                 onClick = { showLibrariesDialog = true },
             )
         }
@@ -1052,6 +1060,8 @@ private fun SettingsScreen(
 
     if (showLibrariesDialog) {
         val libraries = listOf(
+            "Google AdSense" to "https://www.google.com/adsense/",
+            "Google Mobile Ads SDK" to "https://developers.google.com/admob/android/quick-start",
             "Firebase" to "https://firebase.google.com/",
             "Coil" to "https://coil-kt.github.io/coil/",
             "AndroidX" to "https://developer.android.com/jetpack/androidx",
@@ -1478,7 +1488,7 @@ private fun NewsList(
             }
             itemsIndexed(items.drop(1)) { index, item ->
                 StoryCard(item, selected = item.id == selectedItem?.id, onStorySelected)
-                if ((index + 1) % 6 == 0) {
+                if ((index + 1) % 4 == 0) {
                     NativeAdvancedAdCard()
                 }
             }
@@ -1697,7 +1707,7 @@ private fun NativeAdvancedAdCard(modifier: Modifier = Modifier) {
     var adFailed by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
-        val adLoader = AdLoader.Builder(context, "ca-app-pub-7596383212906226/5934663589")
+        val adLoader = AdLoader.Builder(context, "ca-app-pub-7596383212906226/5924879128")
             .forNativeAd { ad ->
                 nativeAd = ad
             }
@@ -1769,6 +1779,18 @@ private fun NativeAdvancedAdCard(modifier: Modifier = Modifier) {
                     adView.setNativeAd(currentAd)
                 }
             )
+        }
+    } else if (!adFailed) {
+        Card(
+            modifier = modifier.fillMaxWidth().height(180.dp),
+            shape = RoundedCornerShape(6.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+            border = BorderStroke(1.dp, AccentSoft),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                SkeletonBlock(Modifier.fillMaxSize())
+            }
         }
     }
 }
