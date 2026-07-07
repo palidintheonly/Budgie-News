@@ -267,9 +267,10 @@ class MainActivity : ComponentActivity() {
 }
 
 private object BudgieFirebase {
+    @Suppress("DEPRECATION")
     fun setup(context: Context) {
         Firebase.analytics.logEvent("budgie_app_open", null)
-        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.0.15-alpha")
+        FirebaseCrashlytics.getInstance().setCustomKey("budgie_version", "0.1.0-beta")
         FirebasePerformance.getInstance().isPerformanceCollectionEnabled = true
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             runCatching {
@@ -589,7 +590,7 @@ internal object BudgieVersionCheck {
                                 )
                         }
                     }
-                    val minVersion = snapshot?.getString("minRequiredVersion") ?: "0.0.15-alpha"
+                    val minVersion = snapshot?.getString("minRequiredVersion") ?: "0.1.0-beta"
                     val message = snapshot?.getString("updateMessage") ?: "A new version of Budgie News is required. Please update your app to continue reading news."
                     val url = snapshot?.getString("updateUrl") ?: "https://budgienews.com"
                     val forceLock = snapshot?.getBoolean("forceLock") == true
@@ -2234,7 +2235,7 @@ private fun android.content.Context.openUrl(url: String) {
 
 private fun Context.appVersionText(): String {
     val packageInfo = packageManager.getPackageInfo(packageName, 0)
-    return packageInfo.versionName ?: "0.0.15-alpha"
+    return packageInfo.versionName ?: "0.1.0-beta"
 }
 
 private fun sendDiscordWebhook(
