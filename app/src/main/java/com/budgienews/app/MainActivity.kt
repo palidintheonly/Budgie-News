@@ -62,10 +62,6 @@ import android.view.LayoutInflater
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
-import com.google.android.gms.ads.AdLoader
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.nativead.NativeAd
-import com.google.android.gms.ads.nativead.NativeAdView
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -764,6 +760,8 @@ private fun NewsApp() {
     var selectedItem by remember { mutableStateOf<FeedItem?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
+    var houseAd by remember { mutableStateOf<HouseAd?>(null) }
+    var houseAds by remember { mutableStateOf<List<HouseAd>>(emptyList()) }
     val articleSignal by ArticleSignals.version.collectAsState()
     val openArticleId by ArticleSignals.openArticleId.collectAsState()
     val updateConfig by BudgieVersionCheck.config.collectAsState()
@@ -790,11 +788,22 @@ private fun NewsApp() {
         scope.launch {
             state = fetchFeeds(context, selectedSection, selectedSource, settings)
         }
+        scope.launch {
+            val fetched = HouseAdRepository.fetchHouseAds(context)
+            houseAds = fetched
+            houseAd = fetched.firstOrNull()
+        }
     }
 
     LaunchedEffect(refreshToken, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled, articleSignal) {
         state = FeedState.Loading
         state = fetchFeeds(context, selectedSection, selectedSource, settings)
+    }
+
+    LaunchedEffect(refreshToken) {
+        val fetched = HouseAdRepository.fetchHouseAds(context)
+        houseAds = fetched
+        houseAd = fetched.firstOrNull()
     }
 
     LaunchedEffect(openArticleId, state) {
@@ -876,6 +885,8 @@ private fun NewsApp() {
                                     selectedSection = selectedSection,
                                     selectedSource = selectedSource,
                                     selectedItem = detailItem,
+                                    houseAd = houseAd,
+                                    houseAds = houseAds,
                                     onSectionSelected = { selectedSection = it },
                                     onSourceSelected = { selectedSource = it },
                                     onStorySelected = { selectedItem = it },
@@ -1041,15 +1052,8 @@ private fun SettingsScreen(
         }
         item {
             SettingsRow(
-                title = "Open Ad Inspector",
-                description = "Launch Google Ad Inspector to test ad delivery without shaking.",
-                onClick = { com.google.android.gms.ads.MobileAds.openAdInspector(context) {} },
-            )
-        }
-        item {
-            SettingsRow(
                 title = "Third party libraries",
-                description = "Google AdSense, Google Mobile Ads SDK, Firebase, Coil, AndroidX, Kotlin, and Jetpack Compose.",
+                description = "Firebase, Coil, AndroidX, Kotlin, and Jetpack Compose.",
                 onClick = { showLibrariesDialog = true },
             )
         }
@@ -1060,8 +1064,6 @@ private fun SettingsScreen(
 
     if (showLibrariesDialog) {
         val libraries = listOf(
-            "Google AdSense" to "https://www.google.com/adsense/",
-            "Google Mobile Ads SDK" to "https://developers.google.com/admob/android/quick-start",
             "Firebase" to "https://firebase.google.com/",
             "Coil" to "https://coil-kt.github.io/coil/",
             "AndroidX" to "https://developer.android.com/jetpack/androidx",
@@ -1397,16 +1399,8 @@ private fun TypewriterText(
     lineHeight: TextUnit = TextUnit.Unspecified,
     maxLines: Int = 3,
 ) {
-    var visibleText by remember(text) { mutableStateOf("") }
-    LaunchedEffect(text) {
-        visibleText = ""
-        text.indices.forEach { index ->
-            visibleText = text.take(index + 1)
-            delay(18)
-        }
-    }
     Text(
-        visibleText,
+        text = text,
         modifier = modifier,
         color = color,
         fontSize = fontSize,
@@ -1417,6 +1411,67 @@ private fun TypewriterText(
     )
 }
 
+@Composable
+private fun NewsList(
+    items: List<FeedItem>,
+    selectedSection: NewsSection,
+    selectedSource: SourceFilter,
+    selectedItem: FeedItem?,
+    houseAd: HouseAd? = null,
+    houseAds: List<HouseAd> = emptyList(),
+    onSectionSelected: (NewsSection) -> Unit,
+    onSourceSelected: (SourceFilter) -> Unit,
+    onStorySelected: (FeedItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Paper)
+            .padding(horizontal = 12.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(key = "section_menu") {
+            SectionMenu(
+                selectedSection = selectedSection,
+                selectedSource = selectedSource,
+                onSectionSelected = onSectionSelected,
+                onSourceSelected = onSourceSelected,
+            )
+        }
+        item(key = "coverage_overview") {
+            CoverageOverview(items, selectedSource)
+        }
+        item(key = "feed_source_note") {
+            FeedSourceNote(selectedSource)
+        }
+        val activeAds = (houseAds + listOfNotNull(houseAd)).filter { it.isActive }.distinctBy { it.id }
+        if (items.isEmpty()) {
+            item(key = "empty_section") {
+                EmptySection(selectedSection)
+            }
+        } else {
+            item(key = "lead_story_${items.first().id}") {
+                LeadStory(items.first(), selectedSection, onStorySelected)
+            }
+            val remaining = items.drop(1)
+            remaining.forEachIndexed { index, item ->
+                item(key = "story_${item.id}") {
+                    StoryCard(item, selected = item.id == selectedItem?.id, onStorySelected)
+                }
+                val itemCount = index + 2
+                if (activeAds.isNotEmpty() && itemCount % 4 == 0) {
+                    val adIndex = (itemCount / 4) - 1
+                    val ad = activeAds[adIndex % activeAds.size]
+                    item(key = "house_ad_${ad.id}_after_item_$itemCount") {
+                        HouseAdBanner(ad)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
@@ -1444,54 +1499,6 @@ private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier =
                 Text("Try again", fontSize = 14.sp, lineHeight = 20.sp)
             }
         }
-        }
-    }
-}
-
-@Composable
-private fun NewsList(
-    items: List<FeedItem>,
-    selectedSection: NewsSection,
-    selectedSource: SourceFilter,
-    selectedItem: FeedItem?,
-    onSectionSelected: (NewsSection) -> Unit,
-    onSourceSelected: (SourceFilter) -> Unit,
-    onStorySelected: (FeedItem) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            SectionMenu(
-                selectedSection = selectedSection,
-                selectedSource = selectedSource,
-                onSectionSelected = onSectionSelected,
-                onSourceSelected = onSourceSelected,
-            )
-        }
-        item {
-            CoverageOverview(items, selectedSource)
-        }
-        item {
-            FeedSourceNote(selectedSource)
-        }
-        if (items.isEmpty()) {
-            item {
-                EmptySection(selectedSection)
-            }
-        } else {
-            item {
-                LeadStory(items.firstOrNull(), selectedSection, onStorySelected)
-            }
-            itemsIndexed(items.drop(1)) { index, item ->
-                StoryCard(item, selected = item.id == selectedItem?.id, onStorySelected)
-                if ((index + 1) % 4 == 0) {
-                    NativeAdvancedAdCard()
-                }
-            }
         }
     }
 }
@@ -1668,6 +1675,55 @@ private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (F
 }
 
 @Composable
+private fun HouseAdBanner(ad: HouseAd, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var visible by remember(ad.id) { mutableStateOf(false) }
+    LaunchedEffect(ad.id) { visible = true }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(350)) + slideInVertically(animationSpec = tween(350)) { it / 8 },
+        modifier = modifier,
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { context.openCustomTab(ad.targetUrl) },
+            shape = RoundedCornerShape(6.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+            border = BorderStroke(1.dp, AccentSoft),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column {
+                RemoteImage(ad.mediaUrl, Modifier.fillMaxWidth().aspectRatio(2.2f))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        TypewriterText(ad.title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        TypewriterText("Tap to learn more", color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = AccentSoft,
+                        border = BorderStroke(1.dp, Accent),
+                    ) {
+                        Text(
+                            text = "Promo",
+                            color = Accent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun StoryCard(item: FeedItem, selected: Boolean, onStorySelected: (FeedItem) -> Unit) {
     var visible by remember(item.link) { mutableStateOf(false) }
     LaunchedEffect(item.link) { visible = true }
@@ -1695,101 +1751,6 @@ private fun StoryCard(item: FeedItem, selected: Boolean, onStorySelected: (FeedI
                     StoryMeta(item)
                 }
                 Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun NativeAdvancedAdCard(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    var nativeAd by remember { mutableStateOf<NativeAd?>(null) }
-    var adFailed by remember { mutableStateOf(false) }
-
-    DisposableEffect(Unit) {
-        val adLoader = AdLoader.Builder(context, "ca-app-pub-7596383212906226/5924879128")
-            .forNativeAd { ad ->
-                nativeAd = ad
-            }
-            .withAdListener(object : com.google.android.gms.ads.AdListener() {
-                override fun onAdFailedToLoad(error: com.google.android.gms.ads.LoadAdError) {
-                    adFailed = true
-                }
-            })
-            .build()
-        adLoader.loadAd(AdRequest.Builder().build())
-
-        onDispose {
-            nativeAd?.destroy()
-        }
-    }
-
-    val currentAd = nativeAd
-    if (currentAd != null && !adFailed) {
-        Card(
-            modifier = modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(6.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-            border = BorderStroke(1.dp, AccentSoft),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        ) {
-            AndroidView(
-                modifier = Modifier.fillMaxWidth(),
-                factory = { ctx ->
-                    val adView = LayoutInflater.from(ctx).inflate(R.layout.ad_native_advanced, null) as NativeAdView
-                    adView.headlineView = adView.findViewById(R.id.ad_headline)
-                    adView.bodyView = adView.findViewById(R.id.ad_body)
-                    adView.callToActionView = adView.findViewById(R.id.ad_call_to_action)
-                    adView.iconView = adView.findViewById(R.id.ad_app_icon)
-                    adView.mediaView = adView.findViewById(R.id.ad_media)
-                    adView.advertiserView = adView.findViewById(R.id.ad_advertiser)
-                    adView
-                },
-                update = { adView ->
-                    (adView.headlineView as? TextView)?.text = currentAd.headline
-                    
-                    if (currentAd.body == null) {
-                        adView.bodyView?.visibility = android.view.View.GONE
-                    } else {
-                        adView.bodyView?.visibility = android.view.View.VISIBLE
-                        (adView.bodyView as? TextView)?.text = currentAd.body
-                    }
-
-                    if (currentAd.callToAction == null) {
-                        adView.callToActionView?.visibility = android.view.View.INVISIBLE
-                    } else {
-                        adView.callToActionView?.visibility = android.view.View.VISIBLE
-                        (adView.callToActionView as? Button)?.text = currentAd.callToAction
-                    }
-
-                    if (currentAd.icon == null) {
-                        adView.iconView?.visibility = android.view.View.GONE
-                    } else {
-                        (adView.iconView as? ImageView)?.setImageDrawable(currentAd.icon?.drawable)
-                        adView.iconView?.visibility = android.view.View.VISIBLE
-                    }
-
-                    if (currentAd.advertiser == null) {
-                        adView.advertiserView?.visibility = android.view.View.GONE
-                    } else {
-                        (adView.advertiserView as? TextView)?.text = currentAd.advertiser
-                        adView.advertiserView?.visibility = android.view.View.VISIBLE
-                    }
-
-                    adView.setNativeAd(currentAd)
-                }
-            )
-        }
-    } else if (!adFailed) {
-        Card(
-            modifier = modifier.fillMaxWidth().height(180.dp),
-            shape = RoundedCornerShape(6.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-            border = BorderStroke(1.dp, AccentSoft),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                SkeletonBlock(Modifier.fillMaxSize())
             }
         }
     }
@@ -2344,6 +2305,16 @@ private fun android.content.Context.openUrl(url: String) {
     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 }
 
+private fun android.content.Context.openCustomTab(url: String) {
+    if (url.isBlank()) return
+    runCatching {
+        val customTabsIntent = androidx.browser.customtabs.CustomTabsIntent.Builder().build()
+        customTabsIntent.launchUrl(this, Uri.parse(url))
+    }.onFailure {
+        openUrl(url)
+    }
+}
+
 private fun Context.appVersionText(): String {
     val packageInfo = packageManager.getPackageInfo(packageName, 0)
     return packageInfo.versionName ?: "0.1.0-beta"
@@ -2441,6 +2412,8 @@ private fun NewsPreview() {
             selectedSection = NewsSection.HEADLINES,
             selectedSource = SourceFilter.ALL,
             selectedItem = null,
+            houseAd = null,
+            houseAds = emptyList(),
             onSectionSelected = {},
             onSourceSelected = {},
             onStorySelected = {},

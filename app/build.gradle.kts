@@ -14,11 +14,12 @@ android {
         minSdk = 27
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0-beta"
+        versionName = "0.1.1-beta"
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     buildTypes {
@@ -52,6 +53,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.play.services.ads)
+    implementation(libs.androidx.browser)
+    implementation(libs.play.services.ads.identifier)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
