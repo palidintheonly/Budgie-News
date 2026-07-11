@@ -86,6 +86,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
@@ -1991,32 +1993,75 @@ private fun StoryDetail(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         val isAudioPlaying by BudgieAudioReader.isPlaying.collectAsState()
+                        val isAudioLoading by BudgieAudioReader.isLoading.collectAsState()
+                        val audioProgress by BudgieAudioReader.playbackProgress.collectAsState()
+                        val remainingSec by BudgieAudioReader.remainingTimeSeconds.collectAsState()
                         val activeAudioId by BudgieAudioReader.currentArticleId.collectAsState()
                         val currentRate by BudgieAudioReader.speechRate.collectAsState()
                         val playingThis = isAudioPlaying && activeAudioId == item.id
+                        val loadingThis = isAudioLoading && activeAudioId == item.id
 
                         Button(
                             onClick = { BudgieAudioReader.togglePlay(context, item) },
                             shape = RoundedCornerShape(6.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (playingThis) AccentSoft else SurfaceRaised,
-                                contentColor = if (playingThis) Accent else Ink,
+                                containerColor = if (playingThis || loadingThis) AccentSoft else SurfaceRaised,
+                                contentColor = if (playingThis || loadingThis) Accent else Ink,
                             ),
-                            border = BorderStroke(1.dp, if (playingThis) Accent else AccentSoft),
+                            border = BorderStroke(1.dp, if (playingThis || loadingThis) Accent else AccentSoft),
                             modifier = Modifier.weight(1f),
                         ) {
-                            Icon(
-                                if (playingThis) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(Modifier.size(6.dp))
-                            Text(
-                                text = if (playingThis) "Listening (${currentRate}x)" else "Listen to Summary",
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                maxLines = 1,
-                            )
+                            if (loadingThis) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Accent,
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(Modifier.size(8.dp))
+                                Text(
+                                    text = "Connecting...",
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    maxLines = 1,
+                                )
+                            } else if (playingThis) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(20.dp)) {
+                                    CircularProgressIndicator(
+                                        progress = { audioProgress },
+                                        modifier = Modifier.size(20.dp),
+                                        color = Accent,
+                                        trackColor = Accent.copy(alpha = 0.25f),
+                                        strokeWidth = 2.2.dp,
+                                    )
+                                    Icon(
+                                        Icons.Rounded.Stop,
+                                        contentDescription = "Stop",
+                                        modifier = Modifier.size(12.dp),
+                                        tint = Accent,
+                                    )
+                                }
+                                Spacer(Modifier.size(8.dp))
+                                val remText = if (remainingSec > 0) "-${remainingSec / 60}:${(remainingSec % 60).toString().padStart(2, '0')}" else ""
+                                Text(
+                                    text = if (remText.isNotEmpty()) "Listening (${currentRate}x) • $remText" else "Listening (${currentRate}x)",
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    maxLines = 1,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.size(6.dp))
+                                Text(
+                                    text = "Listen to Summary",
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                         if (playingThis) {
                             Surface(
@@ -2043,6 +2088,41 @@ private fun StoryDetail(
                                 contentDescription = "Bookmark story",
                                 tint = if (isBookmarked) Accent else Ink,
                             )
+                        }
+                    }
+                    val isAudioPlayingAfter by BudgieAudioReader.isPlaying.collectAsState()
+                    val isAudioLoadingAfter by BudgieAudioReader.isLoading.collectAsState()
+                    val audioProgressAfter by BudgieAudioReader.playbackProgress.collectAsState()
+                    val remainingSecAfter by BudgieAudioReader.remainingTimeSeconds.collectAsState()
+                    val activeAudioIdAfter by BudgieAudioReader.currentArticleId.collectAsState()
+                    if ((isAudioPlayingAfter || isAudioLoadingAfter) && activeAudioIdAfter == item.id) {
+                        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LinearProgressIndicator(
+                                progress = { if (isAudioLoadingAfter) 0f else audioProgressAfter },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(2.5.dp)),
+                                color = Accent,
+                                trackColor = SurfaceRaised,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = if (isAudioLoadingAfter) "Connecting to neural voice engine..." else "${(audioProgressAfter * 100).toInt()}% complete",
+                                    color = Muted,
+                                    fontSize = 11.sp,
+                                )
+                                if (isAudioPlayingAfter && remainingSecAfter > 0) {
+                                    Text(
+                                        text = "${remainingSecAfter / 60}:${(remainingSecAfter % 60).toString().padStart(2, '0')} remaining",
+                                        color = Muted,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                            }
                         }
                     }
                     Button(
