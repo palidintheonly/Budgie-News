@@ -389,6 +389,7 @@ internal object BudgieNotifications {
             NewsSection.BREAKING -> settings.breakingNotificationsEnabled
             NewsSection.IMPORTANT -> settings.importantNotificationsEnabled
             NewsSection.HEADLINES -> settings.headlinesNotificationsEnabled
+            NewsSection.SAVED -> false
         }
         if (!enabled) return
 
@@ -400,6 +401,7 @@ internal object BudgieNotifications {
             NewsSection.BREAKING -> "last_breaking_link"
             NewsSection.IMPORTANT -> "last_important_link"
             NewsSection.HEADLINES -> "last_headlines_link"
+            NewsSection.SAVED -> "last_saved_link"
         }
         if (prefs.getString(key, "") == articleId && !isPush) return
         prefs.edit().putString(key, articleId).apply()
@@ -409,7 +411,7 @@ internal object BudgieNotifications {
         val channelId = when (section) {
             NewsSection.BREAKING -> BREAKING_CHANNEL_ID
             NewsSection.IMPORTANT -> IMPORTANT_CHANNEL_ID
-            NewsSection.HEADLINES -> DEFAULT_CHANNEL_ID
+            NewsSection.HEADLINES, NewsSection.SAVED -> DEFAULT_CHANNEL_ID
         }
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -2383,7 +2385,7 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
 }
 
 internal fun List<FeedItem>.filterFor(section: NewsSection): List<FeedItem> = when (section) {
-    NewsSection.HEADLINES -> this
+    NewsSection.HEADLINES, NewsSection.SAVED -> this
     NewsSection.BREAKING -> filter { item ->
         item.matchesAny(
             "breaking",
