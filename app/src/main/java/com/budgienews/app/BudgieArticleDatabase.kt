@@ -52,6 +52,26 @@ internal object BudgieTime {
 internal class BudgieArticleDatabase private constructor(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "budgie_articles.db", null, 1) {
 
+    init {
+        runCatching {
+            writableDatabase.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS bookmarked_articles (
+                    article_id TEXT NOT NULL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    link TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    published_at TEXT NOT NULL,
+                    image_url TEXT,
+                    category TEXT NOT NULL,
+                    saved_at INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
+        }
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -66,6 +86,21 @@ internal class BudgieArticleDatabase private constructor(context: Context) :
                 category TEXT NOT NULL,
                 is_read INTEGER NOT NULL DEFAULT 0,
                 received_at INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS bookmarked_articles (
+                article_id TEXT NOT NULL PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                link TEXT NOT NULL,
+                source TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                image_url TEXT,
+                category TEXT NOT NULL,
+                saved_at INTEGER NOT NULL
             )
             """.trimIndent(),
         )
@@ -171,6 +206,93 @@ internal class BudgieArticleDatabase private constructor(context: Context) :
                 isRead = cursor.getInt(8) == 1,
             )
         }
+    }
+
+    fun toggleBookmark(item: FeedItem): Boolean {
+        synchronized(this) {
+            val exists = isBookmarked(item.id)
+            if (exists) {
+                writableDatabase.delete("bookmarked_articles", "article_id = ?", arrayOf(item.id))
+            } else {
+                val values = ContentValues().apply {
+                    put("article_id", item.id)
+                    put("title", item.title)
+                    put("description", item.description)
+                    put("link", item.link)
+                    put("source", item.source)
+                    put("published_at", item.publishedAt)
+                    put("image_url", item.imageUrl)
+                    put("category", item.coverageSources.firstOrNull() ?: item.source)
+                    put("saved_at", System.currentTimeMillis())
+                }
+                writableDatabase.insertWithOnConflict("bookmarked_articles", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            ArticleSignals.changed()
+            return !exists
+        }
+    }
+
+    fun isBookmarked(articleId: String): Boolean {
+        readableDatabase.query(
+            "bookmarked_articles",
+            arrayOf("article_id"),
+            "article_id = ?",
+            arrayOf(articleId),
+            null,
+            null,
+            null,
+            "1",
+        ).use { return it.moveToFirst() }
+    }
+
+    fun bookmarkedIds(): Set<String> {
+        return runCatching {
+            readableDatabase.query(
+                "bookmarked_articles",
+                arrayOf("article_id"),
+                null,
+                null,
+                null,
+                null,
+                null,
+            ).use { cursor ->
+                val set = mutableSetOf<String>()
+                while (cursor.moveToNext()) {
+                    set += cursor.getString(0)
+                }
+                set
+            }
+        }.getOrDefault(emptySet())
+    }
+
+    fun allBookmarks(): List<LocalArticle> {
+        return runCatching {
+            readableDatabase.query(
+                "bookmarked_articles",
+                arrayOf("article_id", "title", "description", "link", "source", "published_at", "image_url", "category"),
+                null,
+                null,
+                null,
+                null,
+                "saved_at DESC",
+            ).use { cursor ->
+                val result = mutableListOf<LocalArticle>()
+                while (cursor.moveToNext()) {
+                    result += LocalArticle(
+                        articleId = cursor.getString(0),
+                        title = cursor.getString(1),
+                        description = cursor.getString(2),
+                        link = cursor.getString(3),
+                        source = cursor.getString(4),
+                        publishedAt = cursor.getString(5),
+                        imageUrl = cursor.getString(6),
+                        category = cursor.getString(7),
+                        isRead = true,
+                    )
+                }
+                result
+            }
+        }.getOrDefault(emptyList())
     }
 
     companion object {

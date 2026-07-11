@@ -67,10 +67,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -114,6 +120,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -741,6 +748,11 @@ internal enum class NewsSection(
         "High-impact UK public-interest stories",
         "No important stories matched the current filters.",
     ),
+    SAVED(
+        "Saved Stories",
+        "Your offline bookmarks for reading anywhere",
+        "No saved stories yet. Tap the bookmark icon on any story to read offline.",
+    ),
 }
 
 internal sealed interface FeedState {
@@ -765,11 +777,21 @@ private fun NewsApp() {
     val articleSignal by ArticleSignals.version.collectAsState()
     val openArticleId by ArticleSignals.openArticleId.collectAsState()
     val updateConfig by BudgieVersionCheck.config.collectAsState()
+    var searchQuery by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
+    val bookmarkedIds by remember(articleSignal) { mutableStateOf(BudgieArticleDatabase.get(context).bookmarkedIds()) }
     val scope = rememberCoroutineScope()
 
-    BackHandler(enabled = selectedItem != null || settingsOpen) {
-        selectedItem = null
-        settingsOpen = false
+    BackHandler(enabled = selectedItem != null || settingsOpen || searchOpen) {
+        if (selectedItem != null) {
+            selectedItem = null
+            BudgieAudioReader.stop()
+        } else if (settingsOpen) {
+            settingsOpen = false
+        } else if (searchOpen) {
+            searchOpen = false
+            searchQuery = ""
+        }
     }
 
     fun saveSettings(updated: AppSettings) {
@@ -786,7 +808,7 @@ private fun NewsApp() {
     fun refresh() {
         state = FeedState.Loading
         scope.launch {
-            state = fetchFeeds(context, selectedSection, selectedSource, settings)
+            state = fetchFeeds(context, selectedSection, selectedSource, settings, searchQuery)
         }
         scope.launch {
             val fetched = HouseAdRepository.fetchHouseAds(context)
@@ -795,9 +817,14 @@ private fun NewsApp() {
         }
     }
 
-    LaunchedEffect(refreshToken, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled, articleSignal) {
+    LaunchedEffect(refreshToken, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled, articleSignal, searchQuery) {
         state = FeedState.Loading
-        state = fetchFeeds(context, selectedSection, selectedSource, settings)
+        if (houseAds.isEmpty()) {
+            val fetched = HouseAdRepository.fetchHouseAds(context)
+            houseAds = fetched
+            houseAd = fetched.firstOrNull()
+        }
+        state = fetchFeeds(context, selectedSection, selectedSource, settings, searchQuery)
     }
 
     LaunchedEffect(refreshToken) {
@@ -829,17 +856,45 @@ private fun NewsApp() {
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        BudgieMark()
-                        Spacer(Modifier.size(10.dp))
-                        Column {
-                            TypewriterText("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            TypewriterText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                    if (searchOpen && selectedItem == null && !settingsOpen) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search news by keyword or topic...", fontSize = 14.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            textStyle = TextStyle(fontSize = 14.sp, color = Ink),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Accent,
+                                unfocusedBorderColor = AccentSoft,
+                                focusedContainerColor = SurfaceRaised,
+                                unfocusedContainerColor = SurfaceRaised,
+                            ),
+                            shape = RoundedCornerShape(6.dp),
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            BudgieMark()
+                            Spacer(Modifier.size(10.dp))
+                            Column {
+                                TypewriterText("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                TypewriterText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                            }
                         }
                     }
                 },
                 actions = {
                     if (selectedItem == null && !settingsOpen) {
+                        IconButton(onClick = {
+                            if (searchOpen) {
+                                searchOpen = false
+                                searchQuery = ""
+                            } else {
+                                searchOpen = true
+                            }
+                        }) {
+                            Icon(if (searchOpen) Icons.Rounded.Close else Icons.Rounded.Search, contentDescription = "Search", tint = Ink)
+                        }
                         IconButton(onClick = { settingsOpen = true }) {
                             Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = Ink)
                         }
@@ -849,12 +904,19 @@ private fun NewsApp() {
                     }
                 },
                 navigationIcon = {
-                    if (selectedItem != null || settingsOpen) {
+                    if (selectedItem != null || settingsOpen || searchOpen) {
                         IconButton(onClick = {
-                            selectedItem = null
-                            settingsOpen = false
+                            if (selectedItem != null) {
+                                selectedItem = null
+                                BudgieAudioReader.stop()
+                            } else if (settingsOpen) {
+                                settingsOpen = false
+                            } else if (searchOpen) {
+                                searchOpen = false
+                                searchQuery = ""
+                            }
                         }) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to news", tint = Ink)
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = Ink)
                         }
                     }
                 },
@@ -873,7 +935,13 @@ private fun NewsApp() {
             BoxWithConstraints(Modifier.padding(padding).fillMaxSize()) {
                 val useTwoPane = maxWidth >= 720.dp
                 if (!useTwoPane && detailItem != null) {
-                    StoryDetail(detailItem)
+                    StoryDetail(
+                        item = detailItem,
+                        houseAd = houseAd,
+                        houseAds = houseAds,
+                        isBookmarked = bookmarkedIds.contains(detailItem.id),
+                        onToggleBookmark = { item -> BudgieArticleDatabase.get(context).toggleBookmark(item) },
+                    )
                 } else {
                     Row(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(if (useTwoPane && detailItem != null) 0.48f else 1f).fillMaxSize()) {
@@ -887,6 +955,8 @@ private fun NewsApp() {
                                     selectedItem = detailItem,
                                     houseAd = houseAd,
                                     houseAds = houseAds,
+                                    bookmarkedIds = bookmarkedIds,
+                                    onToggleBookmark = { item -> BudgieArticleDatabase.get(context).toggleBookmark(item) },
                                     onSectionSelected = { selectedSection = it },
                                     onSourceSelected = { selectedSource = it },
                                     onStorySelected = { selectedItem = it },
@@ -897,7 +967,13 @@ private fun NewsApp() {
                             Spacer(Modifier.width(1.dp).fillMaxSize().background(AccentSoft))
                             Box(Modifier.weight(0.52f).fillMaxSize()) {
                                 if (detailItem != null) {
-                                    StoryDetail(detailItem)
+                                    StoryDetail(
+                                        item = detailItem,
+                                        houseAd = houseAd,
+                                        houseAds = houseAds,
+                                        isBookmarked = bookmarkedIds.contains(detailItem.id),
+                                        onToggleBookmark = { item -> BudgieArticleDatabase.get(context).toggleBookmark(item) },
+                                    )
                                 } else {
                                     DetailPlaceholder()
                                 }
@@ -1419,6 +1495,8 @@ private fun NewsList(
     selectedItem: FeedItem?,
     houseAd: HouseAd? = null,
     houseAds: List<HouseAd> = emptyList(),
+    bookmarkedIds: Set<String> = emptySet(),
+    onToggleBookmark: (FeedItem) -> Unit = {},
     onSectionSelected: (NewsSection) -> Unit,
     onSourceSelected: (SourceFilter) -> Unit,
     onStorySelected: (FeedItem) -> Unit,
@@ -1447,22 +1525,39 @@ private fun NewsList(
             FeedSourceNote(selectedSource)
         }
         val activeAds = (houseAds + listOfNotNull(houseAd)).filter { it.isActive }.distinctBy { it.id }
+        if (activeAds.isNotEmpty()) {
+            item(key = "house_ad_top_${activeAds.first().id}") {
+                HouseAdBanner(activeAds.first())
+            }
+        }
         if (items.isEmpty()) {
             item(key = "empty_section") {
                 EmptySection(selectedSection)
             }
         } else {
             item(key = "lead_story_${items.first().id}") {
-                LeadStory(items.first(), selectedSection, onStorySelected)
+                LeadStory(
+                    item = items.first(),
+                    section = selectedSection,
+                    isBookmarked = bookmarkedIds.contains(items.first().id),
+                    onToggleBookmark = onToggleBookmark,
+                    onStorySelected = onStorySelected,
+                )
             }
             val remaining = items.drop(1)
             remaining.forEachIndexed { index, item ->
                 item(key = "story_${item.id}") {
-                    StoryCard(item, selected = item.id == selectedItem?.id, onStorySelected)
+                    StoryCard(
+                        item = item,
+                        selected = item.id == selectedItem?.id,
+                        isBookmarked = bookmarkedIds.contains(item.id),
+                        onToggleBookmark = onToggleBookmark,
+                        onStorySelected = onStorySelected,
+                    )
                 }
                 val itemCount = index + 2
                 if (activeAds.isNotEmpty() && itemCount % 4 == 0) {
-                    val adIndex = (itemCount / 4) - 1
+                    val adIndex = itemCount / 4
                     val ad = activeAds[adIndex % activeAds.size]
                     item(key = "house_ad_${ad.id}_after_item_$itemCount") {
                         HouseAdBanner(ad)
@@ -1521,7 +1616,11 @@ private fun SectionMenu(
                 label = { Text(section.label) },
                 leadingIcon = {
                     Icon(
-                        if (section == NewsSection.IMPORTANT) Icons.Rounded.PriorityHigh else Icons.AutoMirrored.Rounded.Article,
+                        when (section) {
+                            NewsSection.IMPORTANT -> Icons.Rounded.PriorityHigh
+                            NewsSection.SAVED -> Icons.Rounded.Bookmark
+                            else -> Icons.AutoMirrored.Rounded.Article
+                        },
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                     )
@@ -1641,7 +1740,13 @@ private fun EmptySection(section: NewsSection) {
 }
 
 @Composable
-private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (FeedItem) -> Unit) {
+private fun LeadStory(
+    item: FeedItem?,
+    section: NewsSection,
+    isBookmarked: Boolean = false,
+    onToggleBookmark: (FeedItem) -> Unit = {},
+    onStorySelected: (FeedItem) -> Unit,
+) {
     if (item == null) return
     var visible by remember(item.link) { mutableStateOf(false) }
     LaunchedEffect(item.link) { visible = true }
@@ -1667,7 +1772,20 @@ private fun LeadStory(item: FeedItem?, section: NewsSection, onStorySelected: (F
                         TypewriterText(item.description, color = Muted, fontSize = 14.sp, maxLines = 3, lineHeight = 21.sp)
                     }
                     CoverageRow(item)
-                    StoryMeta(item)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        StoryMeta(item)
+                        IconButton(onClick = { onToggleBookmark(item) }) {
+                            Icon(
+                                if (isBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                                contentDescription = "Bookmark",
+                                tint = if (isBookmarked) Accent else Muted,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1724,7 +1842,13 @@ private fun HouseAdBanner(ad: HouseAd, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun StoryCard(item: FeedItem, selected: Boolean, onStorySelected: (FeedItem) -> Unit) {
+private fun StoryCard(
+    item: FeedItem,
+    selected: Boolean,
+    isBookmarked: Boolean = false,
+    onToggleBookmark: (FeedItem) -> Unit = {},
+    onStorySelected: (FeedItem) -> Unit,
+) {
     var visible by remember(item.link) { mutableStateOf(false) }
     LaunchedEffect(item.link) { visible = true }
     AnimatedVisibility(
@@ -1750,14 +1874,31 @@ private fun StoryCard(item: FeedItem, selected: Boolean, onStorySelected: (FeedI
                     CoverageRow(item)
                     StoryMeta(item)
                 }
-                Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { onToggleBookmark(item) }) {
+                        Icon(
+                            if (isBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                            contentDescription = "Bookmark",
+                            tint = if (isBookmarked) Accent else Muted,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
+                }
             }
         }
     }
 }
 
 @Composable
-private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
+private fun StoryDetail(
+    item: FeedItem,
+    houseAd: HouseAd? = null,
+    houseAds: List<HouseAd> = emptyList(),
+    isBookmarked: Boolean = false,
+    onToggleBookmark: (FeedItem) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -1783,17 +1924,85 @@ private fun StoryDetail(item: FeedItem, modifier: Modifier = Modifier) {
                     TypewriterText(item.title, color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 33.sp)
                     QuickRead(item)
                     CoverageRow(item)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val isAudioPlaying by BudgieAudioReader.isPlaying.collectAsState()
+                        val activeAudioId by BudgieAudioReader.currentArticleId.collectAsState()
+                        val currentRate by BudgieAudioReader.speechRate.collectAsState()
+                        val playingThis = isAudioPlaying && activeAudioId == item.id
+
+                        Button(
+                            onClick = { BudgieAudioReader.togglePlay(context, item) },
+                            shape = RoundedCornerShape(6.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (playingThis) AccentSoft else SurfaceRaised,
+                                contentColor = if (playingThis) Accent else Ink,
+                            ),
+                            border = BorderStroke(1.dp, if (playingThis) Accent else AccentSoft),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(
+                                if (playingThis) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            Text(
+                                text = if (playingThis) "Listening (${currentRate}x)" else "Listen to Summary",
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                maxLines = 1,
+                            )
+                        }
+                        if (playingThis) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = SurfaceRaised,
+                                border = BorderStroke(1.dp, AccentSoft),
+                                modifier = Modifier.clickable { BudgieAudioReader.cycleSpeed() },
+                            ) {
+                                Text(
+                                    text = "${currentRate}x",
+                                    color = Ink,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = { onToggleBookmark(item) },
+                            modifier = Modifier.background(SurfaceRaised, RoundedCornerShape(6.dp)).padding(2.dp),
+                        ) {
+                            Icon(
+                                if (isBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                                contentDescription = "Bookmark story",
+                                tint = if (isBookmarked) Accent else Ink,
+                            )
+                        }
+                    }
                     Button(
                         onClick = { context.openUrl(item.link) },
                         enabled = item.link.isNotBlank(),
                         shape = RoundedCornerShape(6.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Paper),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.size(8.dp))
                         Text("Read official source", fontSize = 14.sp, lineHeight = 20.sp)
                     }
                 }
+            }
+        }
+        val activeAds = (houseAds + listOfNotNull(houseAd)).filter { it.isActive }.distinctBy { it.id }
+        if (activeAds.isNotEmpty()) {
+            val ad = activeAds[(item.id.hashCode() and 0x7FFFFFFF) % activeAds.size]
+            item(key = "story_detail_ad_${ad.id}") {
+                HouseAdBanner(ad)
             }
         }
     }
@@ -1838,7 +2047,7 @@ private fun QuickRead(item: FeedItem) {
     }
 }
 
-private fun FeedItem.quickReadPoints(): List<String> {
+internal fun FeedItem.quickReadPoints(): List<String> {
     val points = mutableListOf<String>()
     points += "Main story: $title"
     if (description.isNotBlank()) points += description
@@ -1953,6 +2162,7 @@ private suspend fun fetchFeeds(
     section: NewsSection,
     sourceFilter: SourceFilter,
     settings: AppSettings,
+    query: String = "",
 ): FeedState = withContext(Dispatchers.IO) {
     BudgieCache.checkReset(context)
     runCatching {
@@ -1963,33 +2173,56 @@ private suspend fun fetchFeeds(
             .map { it.toFeedItem() }
             .filter { isFreeNewsSource(it.source) }
             .filter { sourceFilter.sourceName == null || it.source == sourceFilter.sourceName }
-        val loadedItems = sources
-            .map { source ->
-                runCatching { fetchFeed(source).take(12) }
-                    .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
-                    .getOrDefault(emptyList())
-            }
-            .interleaved()
-            .distinctBy { it.link.ifBlank { it.title } }
+        val loadedItems = if (section == NewsSection.SAVED) {
+            emptyList()
+        } else {
+            sources
+                .map { source ->
+                    runCatching { fetchFeed(source).take(12) }
+                        .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                        .getOrDefault(emptyList())
+                }
+                .interleaved()
+                .distinctBy { it.link.ifBlank { it.title } }
+        }
         val availableItems = if (loadedItems.isNotEmpty()) {
             BudgieCache.save(context, loadedItems)
             loadedItems
+        } else if (section == NewsSection.SAVED) {
+            emptyList()
         } else {
             BudgieCache.load(context)
                 .filter { isFreeNewsSource(it.source) }
                 .filter { item -> sourceFilter.sourceName == null || item.source == sourceFilter.sourceName }
                 .distinctBy { it.link.ifBlank { it.title } }
         }
-        if (availableItems.isEmpty()) {
+        val allItems = if (section == NewsSection.SAVED) {
+            BudgieArticleDatabase.get(context).allBookmarks().map { it.toFeedItem() }
+        } else {
+            (localItems + availableItems).distinctBy { it.link.ifBlank { it.title } }
+        }
+        val filteredItems = if (section == NewsSection.SAVED) {
+            allItems
+        } else {
+            allItems
+                .filterFor(section)
+                .take(24)
+                .withCoverageContext()
+        }
+        val searchedItems = if (query.isNotBlank()) {
+            filteredItems.filter { item ->
+                item.title.contains(query, ignoreCase = true) ||
+                item.description.contains(query, ignoreCase = true) ||
+                item.source.contains(query, ignoreCase = true)
+            }
+        } else {
+            filteredItems
+        }
+        if (searchedItems.isEmpty() && section != NewsSection.SAVED && query.isBlank()) {
             val sourceNames = sources.joinToString { it.name }
             error("No stories loaded from $sourceNames")
         }
-        val allItems = (localItems + availableItems).distinctBy { it.link.ifBlank { it.title } }
-        val filteredItems = allItems
-            .filterFor(section)
-            .take(24)
-            .withCoverageContext()
-        filteredItems
+        searchedItems
     }.fold(
         onSuccess = { items ->
             FeedState.Ready(items)
