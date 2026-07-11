@@ -19,7 +19,7 @@ internal data class HouseAd(
 internal object HouseAdRepository {
     private const val TAG = "HouseAdRepository"
     private const val BASE_URL = "https://house.monkey-network.xyz/api/public/ads"
-    private const val REGISTERED_PACKAGE_NAME = "com.monkeybytes.budgienews"
+    private const val REGISTERED_PACKAGE_NAME = "com.budgienews.app"
 
     /**
      * Retrieves the Google Advertising ID (GAID) off the main thread.

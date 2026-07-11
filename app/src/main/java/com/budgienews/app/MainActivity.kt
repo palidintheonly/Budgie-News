@@ -200,7 +200,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         enableEdgeToEdge()
         BudgieNotifications.ensureChannels(this)
         handleArticleIntent(intent)
@@ -390,7 +390,7 @@ internal object BudgieNotifications {
         val enabled = when (section) {
             NewsSection.BREAKING -> settings.breakingNotificationsEnabled
             NewsSection.IMPORTANT -> settings.importantNotificationsEnabled
-            NewsSection.HEADLINES -> settings.headlinesNotificationsEnabled
+            NewsSection.HEADLINES, NewsSection.GENERAL -> settings.headlinesNotificationsEnabled
             NewsSection.SAVED -> false
         }
         if (!enabled) return
@@ -403,6 +403,7 @@ internal object BudgieNotifications {
             NewsSection.BREAKING -> "last_breaking_link"
             NewsSection.IMPORTANT -> "last_important_link"
             NewsSection.HEADLINES -> "last_headlines_link"
+            NewsSection.GENERAL -> "last_general_link"
             NewsSection.SAVED -> "last_saved_link"
         }
         if (prefs.getString(key, "") == articleId && !isPush) return
@@ -413,7 +414,7 @@ internal object BudgieNotifications {
         val channelId = when (section) {
             NewsSection.BREAKING -> BREAKING_CHANNEL_ID
             NewsSection.IMPORTANT -> IMPORTANT_CHANNEL_ID
-            NewsSection.HEADLINES, NewsSection.SAVED -> DEFAULT_CHANNEL_ID
+            NewsSection.HEADLINES, NewsSection.GENERAL, NewsSection.SAVED -> DEFAULT_CHANNEL_ID
         }
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -751,6 +752,11 @@ internal enum class NewsSection(
         "Important",
         "High-impact UK public-interest stories",
         "No important stories matched the current filters.",
+    ),
+    GENERAL(
+        "General",
+        "Everyday UK news, culture, and general reporting",
+        "No general news stories matched the current filters.",
     ),
     SAVED(
         "Saved Stories",
@@ -2415,6 +2421,10 @@ internal fun List<FeedItem>.filterFor(section: NewsSection): List<FeedItem> = wh
             "economy",
             "security",
         )
+    }
+    NewsSection.GENERAL -> {
+        val general = filter { !it.matchesAny("breaking", "live", "urgent", "developing", "alert", "updates") }
+        general.ifEmpty { this }
     }
 }
 
