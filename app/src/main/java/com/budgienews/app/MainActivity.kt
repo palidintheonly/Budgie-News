@@ -833,7 +833,7 @@ private fun NewsApp() {
         scope.launch {
             val fetched = HouseAdRepository.fetchHouseAds(context)
             houseAds = fetched
-            houseAd = fetched.firstOrNull()
+            houseAd = fetched.filter { it.isActive }.randomOrNull()
         }
     }
 
@@ -842,7 +842,7 @@ private fun NewsApp() {
         if (houseAds.isEmpty()) {
             val fetched = HouseAdRepository.fetchHouseAds(context)
             houseAds = fetched
-            houseAd = fetched.firstOrNull()
+            houseAd = fetched.filter { it.isActive }.randomOrNull()
         }
         state = fetchFeeds(context, selectedSection, selectedSource, settings, searchQuery)
     }
@@ -850,7 +850,7 @@ private fun NewsApp() {
     LaunchedEffect(refreshToken) {
         val fetched = HouseAdRepository.fetchHouseAds(context)
         houseAds = fetched
-        houseAd = fetched.firstOrNull()
+        houseAd = fetched.filter { it.isActive }.randomOrNull()
     }
 
     LaunchedEffect(openArticleId, state) {
@@ -1149,7 +1149,7 @@ private fun SettingsScreen(
         }
         item {
             SettingsRow(
-                title = "What's new in v1.0.0",
+                title = "What's new in v1.0.1",
                 description = "View the latest release highlights and performance improvements.",
                 onClick = { showChangelogDialog = true },
             )
@@ -1323,17 +1323,13 @@ private fun SettingsScreen(
 
     if (showChangelogDialog) {
         val changelogItems = listOf(
-            "Performance Optimization" to "Buttery smooth 60fps scrolling and instant layout transitions via asynchronous background coroutines (`produceState`, `Dispatchers.IO`).",
-            "Real-Time News & Sync" to "Built on Cloud Firestore in Native mode (`europe-west2`) with asynchronous background batch inserts and upserts.",
-            "Self-Hosted House Ads" to "Privacy-friendly promotional delivery (`HouseAdRepository`) cleanly interspersed after every 4th story with native badges.",
-            "Saved Stories & Offline Reading" to "Dedicated `SAVED` tab powered by `BudgieArticleDatabase` SQLite storage with instantaneous non-blocking bookmark actions.",
-            "General News Category" to "Dedicated `GENERAL` tab across all outlets separating everyday news from urgent breaking alerts.",
-            "Hybrid Neural Audio Reader" to "Instant `<1.2s` playback streaming natural neural `Brian` voice when online, auto-switching to high-quality on-device neural TTS offline.",
-            "Keyword Search" to "Interactive search toggle in the top bar to instantly filter headlines by keyword or topic."
+            "GAID & Package ID Check" to "Queries Google Advertising ID off main thread (`AdvertisingIdClient`) when fetching house ads, respecting `isLimitAdTrackingEnabled` opt-outs, and corrects `REGISTERED_PACKAGE_NAME` verification to `com.monkeybytes.budgienews`.",
+            "Randomized Ad Rotation" to "Replaces static (`ads.first()`) and deterministic modulus selection across all ad banner slots (`NewsList`, `StoryDetail`) with true random campaign selection (`activeAds.random()`) across refreshes.",
+            "Full Native Ad Shape UI" to "Upgrades `HouseAdBanner` to render `icon_url` thumbnail, `headline`, `advertiser`, `body` text, `star_rating`, `media_url`, and a `call_to_action` button (`Learn More` fallback) in proper visual hierarchy."
         )
         AlertDialog(
             onDismissRequest = { showChangelogDialog = false },
-            title = { BudgieText("What's new in v1.0.0", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold) },
+            title = { BudgieText("What's new in v1.0.1", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1589,8 +1585,9 @@ private fun NewsList(
         }
         val activeAds = (houseAds + listOfNotNull(houseAd)).filter { it.isActive }.distinctBy { it.id }
         if (activeAds.isNotEmpty()) {
-            item(key = "house_ad_top_${activeAds.first().id}") {
-                HouseAdBanner(activeAds.first())
+            val ad = activeAds.random()
+            item(key = "house_ad_top_${ad.id}") {
+                HouseAdBanner(ad)
             }
         }
         if (items.isEmpty()) {
@@ -1620,8 +1617,7 @@ private fun NewsList(
                 }
                 val itemCount = index + 2
                 if (activeAds.isNotEmpty() && itemCount % 4 == 0) {
-                    val adIndex = itemCount / 4
-                    val ad = activeAds[adIndex % activeAds.size]
+                    val ad = activeAds.random()
                     item(key = "house_ad_${ad.id}_after_item_$itemCount") {
                         HouseAdBanner(ad)
                     }
@@ -1874,16 +1870,44 @@ private fun HouseAdBanner(ad: HouseAd, modifier: Modifier = Modifier) {
             border = BorderStroke(1.dp, AccentSoft),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
-            Column {
-                RemoteImage(ad.mediaUrl, Modifier.fillMaxWidth().aspectRatio(2.2f))
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        TypewriterText(ad.title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                        TypewriterText("Tap to learn more", color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                    if (!ad.iconUrl.isNullOrBlank()) {
+                        RemoteImage(
+                            url = ad.iconUrl,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                        )
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        TypewriterText(
+                            text = ad.headline,
+                            color = Ink,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2
+                        )
+                        if (!ad.advertiser.isNullOrBlank()) {
+                            TypewriterText(
+                                text = ad.advertiser,
+                                color = Muted,
+                                fontSize = 12.sp,
+                                maxLines = 1
+                            )
+                        }
                     }
                     Surface(
                         shape = RoundedCornerShape(4.dp),
@@ -1898,6 +1922,59 @@ private fun HouseAdBanner(ad: HouseAd, modifier: Modifier = Modifier) {
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
+                }
+
+                if (!ad.body.isNullOrBlank()) {
+                    TypewriterText(
+                        text = ad.body,
+                        color = Muted,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        maxLines = 3
+                    )
+                }
+
+                if (ad.starRating != null && ad.starRating > 0f) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = String.format(java.util.Locale.US, "★ %.1f", ad.starRating),
+                            color = Accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                if (ad.mediaUrl.isNotBlank()) {
+                    RemoteImage(
+                        url = ad.mediaUrl,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(2.2f)
+                            .clip(RoundedCornerShape(6.dp))
+                    )
+                }
+
+                val ctaText = ad.callToAction?.takeIf { it.isNotBlank() } ?: "Learn More"
+                Button(
+                    onClick = { context.openCustomTab(ad.targetUrl) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentSoft,
+                        contentColor = Accent
+                    ),
+                    border = BorderStroke(1.dp, Accent),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Text(
+                        text = ctaText,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -2141,7 +2218,7 @@ private fun StoryDetail(
         }
         val activeAds = (houseAds + listOfNotNull(houseAd)).filter { it.isActive }.distinctBy { it.id }
         if (activeAds.isNotEmpty()) {
-            val ad = activeAds[(item.id.hashCode() and 0x7FFFFFFF) % activeAds.size]
+            val ad = activeAds.random()
             item(key = "story_detail_ad_${ad.id}") {
                 HouseAdBanner(ad)
             }

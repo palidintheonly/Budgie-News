@@ -10,7 +10,13 @@ import org.json.JSONArray
 
 internal data class HouseAd(
     val id: String,
-    val title: String,
+    val headline: String,
+    val title: String = headline,
+    val body: String?,
+    val callToAction: String?,
+    val advertiser: String?,
+    val iconUrl: String?,
+    val starRating: Float?,
     val mediaUrl: String,
     val targetUrl: String,
     val isActive: Boolean,
@@ -19,7 +25,7 @@ internal data class HouseAd(
 internal object HouseAdRepository {
     private const val TAG = "HouseAdRepository"
     private const val BASE_URL = "https://house.monkey-network.xyz/api/public/ads"
-    private const val REGISTERED_PACKAGE_NAME = "com.budgienews.app"
+    private const val REGISTERED_PACKAGE_NAME = "com.monkeybytes.budgienews"
 
     /**
      * Retrieves the Google Advertising ID (GAID) off the main thread.
@@ -79,13 +85,35 @@ internal object HouseAdRepository {
                 for (i in 0 until array.length()) {
                     val obj = array.optJSONObject(i) ?: continue
                     val id = obj.optString("id", "")
-                    val title = obj.optString("title", "")
+                    val headline = obj.optString("headline", "").takeIf { it.isNotBlank() } ?: obj.optString("title", "")
+                    val body = if (obj.isNull("body")) null else obj.optString("body", "").takeIf { it.isNotBlank() }
+                    val callToAction = if (obj.isNull("call_to_action")) null else obj.optString("call_to_action", "").takeIf { it.isNotBlank() }
+                    val advertiser = if (obj.isNull("advertiser")) null else obj.optString("advertiser", "").takeIf { it.isNotBlank() }
+                    val iconUrl = if (obj.isNull("icon_url")) null else obj.optString("icon_url", "").takeIf { it.isNotBlank() }
+                    val starRating = if (obj.isNull("star_rating")) null else {
+                        val value = obj.optDouble("star_rating", Double.NaN)
+                        if (value.isNaN()) null else value.toFloat()
+                    }
                     val mediaUrl = obj.optString("media_url", "")
                     val targetUrl = obj.optString("target_url", "")
                     val isActive = obj.optBoolean("is_active", true)
 
-                    if (id.isNotBlank() && mediaUrl.isNotBlank() && targetUrl.isNotBlank() && isActive) {
-                        result.add(HouseAd(id, title, mediaUrl, targetUrl, isActive))
+                    if (headline.isNotBlank() && mediaUrl.isNotBlank() && isActive) {
+                        result.add(
+                            HouseAd(
+                                id = id,
+                                headline = headline,
+                                title = headline,
+                                body = body,
+                                callToAction = callToAction,
+                                advertiser = advertiser,
+                                iconUrl = iconUrl,
+                                starRating = starRating,
+                                mediaUrl = mediaUrl,
+                                targetUrl = targetUrl,
+                                isActive = isActive,
+                            )
+                        )
                     }
                 }
                 result
