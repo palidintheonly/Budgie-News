@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 (Regional Editions & Startup Screen)
+
+- **2-Button Startup Screen (`EditionSelectionScreen`)**: Added an initial region selection screen displayed on app startup when an edition has not been selected yet. Presents two rich, prominent option cards for **GB News** (`🇬🇧`) and **USA News** (`🇺🇸`), while sharing the unified app settings page (`Shared App Settings`), audio reader preferences, and saved bookmarks.
+- **Regional Edition Architecture (`NewsEdition`)**: Introduced `NewsEdition.GB` (United Kingdom Edition) and `NewsEdition.USA` (United States Edition foundation) with regional metadata (flags, titles, subtitles, and custom empty state messages). Updated `FeedSource` and `SourceFilter` with edition awareness so newsrooms filter cleanly by region without adding USA news outlets prematurely.
+- **TopBar Edition Switching**: Updated `TopAppBar` and navigation handling (`BackHandler`) so users can effortlessly toggle between regional editions or return to the startup screen right from the top bar.
+- **Agent Compilation Monitoring (`.agents/AGENTS.md`)**: Added a workspace rule instructing the assistant to actively poll compilation and build task status every 10 seconds until completed (`DONE` or `ERROR`).
+
 ## 1.0.1 (House Ads Engine Upgrades)
 
 - **GAID Query & Package Registration Correction**: Updated `HouseAdRepository` to query and append the device Google Advertising ID (`GAID` via `AdvertisingIdClient`) when requesting `https://house.monkey-network.xyz/api/public/ads`, strictly respecting `isLimitAdTrackingEnabled` opt-outs. Corrected internal `REGISTERED_PACKAGE_NAME` validation to `com.monkeybytes.budgienews`.

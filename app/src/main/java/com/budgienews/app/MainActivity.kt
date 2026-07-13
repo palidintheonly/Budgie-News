@@ -716,9 +716,33 @@ internal data class FeedItem(
     val coverageSources: List<String> = listOf(source),
 )
 
+internal enum class NewsEdition(
+    val title: String,
+    val label: String,
+    val subtitle: String,
+    val flag: String,
+    val emptyMessage: String,
+) {
+    GB(
+        title = "GB News",
+        label = "GB News",
+        subtitle = "United Kingdom Edition",
+        flag = "🇬🇧",
+        emptyMessage = "No UK news stories matched the current filters."
+    ),
+    USA(
+        title = "USA News",
+        label = "USA News",
+        subtitle = "United States Edition",
+        flag = "🇺🇸",
+        emptyMessage = "USA news outlets are coming soon! We're building the foundations for live coverage from leading US newsrooms."
+    )
+}
+
 internal data class FeedSource(
     val name: String,
     val url: String,
+    val edition: NewsEdition = NewsEdition.GB,
 )
 
 internal data class AppSettings(
@@ -731,14 +755,24 @@ internal data class AppSettings(
     val sendAppStatistics: Boolean = true,
 )
 
-internal enum class SourceFilter(val label: String, val sourceName: String?) {
-    ALL("All", null),
-    BBC("BBC", "BBC UK"),
-    SKY("Sky", "Sky News UK"),
-    SKY_POLITICS("Sky Pol", "Sky Politics"),
-    GUARDIAN("Guardian", "Guardian UK"),
-    GUARDIAN_POLITICS("Guard Pol", "Guardian Politics"),
-    SUN("Sun", "The Sun News"),
+internal enum class SourceFilter(val label: String, val sourceName: String?, val edition: NewsEdition? = null) {
+    ALL("All", null, null),
+    BBC("BBC", "BBC UK", NewsEdition.GB),
+    SKY("Sky", "Sky News UK", NewsEdition.GB),
+    SKY_POLITICS("Sky Pol", "Sky Politics", NewsEdition.GB),
+    GUARDIAN("Guardian", "Guardian UK", NewsEdition.GB),
+    GUARDIAN_POLITICS("Guard Pol", "Guardian Politics", NewsEdition.GB),
+    SUN("Sun", "The Sun News", NewsEdition.GB),
+}
+
+internal fun availableSourcesForEdition(edition: NewsEdition?): List<FeedSource> {
+    if (edition == null) return FeedSources
+    return FeedSources.filter { it.edition == edition }
+}
+
+internal fun availableFiltersForEdition(edition: NewsEdition?): List<SourceFilter> {
+    if (edition == null) return SourceFilter.entries
+    return SourceFilter.entries.filter { it.edition == null || it.edition == edition }
 }
 
 internal enum class NewsSection(
@@ -785,6 +819,7 @@ private fun NewsApp() {
     val context = LocalContext.current
     var settings by remember { mutableStateOf(BudgiePrefs.load(context)) }
     var refreshToken by remember { mutableStateOf(0) }
+    var selectedEdition by remember { mutableStateOf<NewsEdition?>(null) }
     var selectedSection by remember { mutableStateOf(settings.defaultSection) }
     var selectedSource by remember { mutableStateOf(settings.defaultSource) }
     var selectedItem by remember { mutableStateOf<FeedItem?>(null) }
@@ -802,7 +837,7 @@ private fun NewsApp() {
     }
     val scope = rememberCoroutineScope()
 
-    BackHandler(enabled = selectedItem != null || settingsOpen || searchOpen) {
+    BackHandler(enabled = selectedItem != null || settingsOpen || searchOpen || selectedEdition != null) {
         if (selectedItem != null) {
             selectedItem = null
             BudgieAudioReader.stop()
@@ -810,6 +845,10 @@ private fun NewsApp() {
             settingsOpen = false
         } else if (searchOpen) {
             searchOpen = false
+            searchQuery = ""
+        } else if (selectedEdition != null) {
+            selectedEdition = null
+            selectedSource = SourceFilter.ALL
             searchQuery = ""
         }
     }
@@ -826,9 +865,10 @@ private fun NewsApp() {
     }
 
     fun refresh() {
+        val edition = selectedEdition ?: return
         state = FeedState.Loading
         scope.launch {
-            state = fetchFeeds(context, selectedSection, selectedSource, settings, searchQuery)
+            state = fetchFeeds(context, selectedSection, selectedSource, settings, searchQuery, edition)
         }
         scope.launch {
             val fetched = HouseAdRepository.fetchHouseAds(context)
@@ -837,14 +877,15 @@ private fun NewsApp() {
         }
     }
 
-    LaunchedEffect(refreshToken, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled, articleSignal, searchQuery) {
+    LaunchedEffect(refreshToken, selectedEdition, selectedSection, selectedSource, settings.breakingNotificationsEnabled, settings.importantNotificationsEnabled, articleSignal, searchQuery) {
+        val edition = selectedEdition ?: return@LaunchedEffect
         state = FeedState.Loading
         if (houseAds.isEmpty()) {
             val fetched = HouseAdRepository.fetchHouseAds(context)
             houseAds = fetched
             houseAd = fetched.filter { it.isActive }.randomOrNull()
         }
-        state = fetchFeeds(context, selectedSection, selectedSource, settings, searchQuery)
+        state = fetchFeeds(context, selectedSection, selectedSource, settings, searchQuery, edition)
     }
 
     LaunchedEffect(refreshToken) {
@@ -855,6 +896,9 @@ private fun NewsApp() {
 
     LaunchedEffect(openArticleId, state) {
         val articleId = openArticleId ?: return@LaunchedEffect
+        if (selectedEdition == null) {
+            selectedEdition = NewsEdition.GB
+        }
         val feedItem = when (val value = state) {
             is FeedState.Ready -> value.items.firstOrNull { item ->
                 item.id == articleId || item.link == articleId
@@ -876,7 +920,7 @@ private fun NewsApp() {
         topBar = {
             TopAppBar(
                 title = {
-                    if (searchOpen && selectedItem == null && !settingsOpen) {
+                    if (searchOpen && selectedItem == null && !settingsOpen && selectedEdition != null) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
@@ -897,14 +941,24 @@ private fun NewsApp() {
                             BudgieMark()
                             Spacer(Modifier.size(10.dp))
                             Column {
-                                TypewriterText("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                TypewriterText(selectedSource.tagline(selectedSection), color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                                val currentEdition = selectedEdition
+                                if (currentEdition == null) {
+                                    TypewriterText("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    TypewriterText("Select Regional Edition", color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                                } else {
+                                    TypewriterText("Budgie News • ${currentEdition.flag} ${currentEdition.title}", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    TypewriterText(selectedSource.tagline(selectedSection, currentEdition), color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                                }
                             }
                         }
                     }
                 },
                 actions = {
-                    if (selectedItem == null && !settingsOpen) {
+                    if (selectedEdition == null && !settingsOpen) {
+                        IconButton(onClick = { settingsOpen = true }) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = Ink)
+                        }
+                    } else if (selectedItem == null && !settingsOpen && selectedEdition != null) {
                         IconButton(onClick = {
                             if (searchOpen) {
                                 searchOpen = false
@@ -924,7 +978,7 @@ private fun NewsApp() {
                     }
                 },
                 navigationIcon = {
-                    if (selectedItem != null || settingsOpen || searchOpen) {
+                    if (selectedItem != null || settingsOpen || searchOpen || selectedEdition != null) {
                         IconButton(onClick = {
                             if (selectedItem != null) {
                                 selectedItem = null
@@ -933,6 +987,10 @@ private fun NewsApp() {
                                 settingsOpen = false
                             } else if (searchOpen) {
                                 searchOpen = false
+                                searchQuery = ""
+                            } else if (selectedEdition != null) {
+                                selectedEdition = null
+                                selectedSource = SourceFilter.ALL
                                 searchQuery = ""
                             }
                         }) {
@@ -949,6 +1007,15 @@ private fun NewsApp() {
             SettingsScreen(
                 settings = settings,
                 onSettingsChanged = ::saveSettings,
+                modifier = Modifier.padding(padding),
+            )
+        } else if (selectedEdition == null) {
+            EditionSelectionScreen(
+                onEditionSelected = { edition ->
+                    selectedEdition = edition
+                    selectedSource = SourceFilter.ALL
+                },
+                onOpenSettings = { settingsOpen = true },
                 modifier = Modifier.padding(padding),
             )
         } else {
@@ -973,6 +1040,7 @@ private fun NewsApp() {
                                     selectedSection = selectedSection,
                                     selectedSource = selectedSource,
                                     selectedItem = detailItem,
+                                    selectedEdition = selectedEdition ?: NewsEdition.GB,
                                     houseAd = houseAd,
                                     houseAds = houseAds,
                                     bookmarkedIds = bookmarkedIds,
@@ -1552,6 +1620,7 @@ private fun NewsList(
     selectedSection: NewsSection,
     selectedSource: SourceFilter,
     selectedItem: FeedItem?,
+    selectedEdition: NewsEdition = NewsEdition.GB,
     houseAd: HouseAd? = null,
     houseAds: List<HouseAd> = emptyList(),
     bookmarkedIds: Set<String> = emptySet(),
@@ -1573,15 +1642,16 @@ private fun NewsList(
             SectionMenu(
                 selectedSection = selectedSection,
                 selectedSource = selectedSource,
+                selectedEdition = selectedEdition,
                 onSectionSelected = onSectionSelected,
                 onSourceSelected = onSourceSelected,
             )
         }
         item(key = "coverage_overview") {
-            CoverageOverview(items, selectedSource)
+            CoverageOverview(items, selectedSource, selectedEdition)
         }
         item(key = "feed_source_note") {
-            FeedSourceNote(selectedSource)
+            FeedSourceNote(selectedSource, selectedEdition)
         }
         val activeAds = (houseAds + listOfNotNull(houseAd)).filter { it.isActive }.distinctBy { it.id }
         if (activeAds.isNotEmpty()) {
@@ -1592,7 +1662,7 @@ private fun NewsList(
         }
         if (items.isEmpty()) {
             item(key = "empty_section") {
-                EmptySection(selectedSection)
+                EmptySection(selectedSection, selectedEdition)
             }
         } else {
             item(key = "lead_story_${items.first().id}") {
@@ -1661,6 +1731,7 @@ private fun ErrorNews(message: String, onRetry: () -> Unit, modifier: Modifier =
 private fun SectionMenu(
     selectedSection: NewsSection,
     selectedSource: SourceFilter,
+    selectedEdition: NewsEdition = NewsEdition.GB,
     onSectionSelected: (NewsSection) -> Unit,
     onSourceSelected: (SourceFilter) -> Unit,
 ) {
@@ -1693,7 +1764,7 @@ private fun SectionMenu(
                 border = BorderStroke(1.dp, if (selected) Accent else AccentSoft),
             )
         }
-        items(SourceFilter.entries.filter { it != SourceFilter.ALL }) { source ->
+        items(availableFiltersForEdition(selectedEdition).filter { it != SourceFilter.ALL }) { source ->
             val selected = source == selectedSource
             AssistChip(
                 onClick = { onSourceSelected(if (selected) SourceFilter.ALL else source) },
@@ -1718,9 +1789,9 @@ private fun SectionMenu(
 }
 
 @Composable
-private fun FeedSourceNote(selectedSource: SourceFilter) {
+private fun FeedSourceNote(selectedSource: SourceFilter, selectedEdition: NewsEdition = NewsEdition.GB) {
     TypewriterText(
-        selectedSource.sourceNote(),
+        selectedSource.sourceNote(selectedEdition),
         color = Muted,
         fontSize = 12.sp,
         lineHeight = 16.sp,
@@ -1729,8 +1800,9 @@ private fun FeedSourceNote(selectedSource: SourceFilter) {
 }
 
 @Composable
-private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter) {
+private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter, selectedEdition: NewsEdition = NewsEdition.GB) {
     val visibleSources = items.map { it.source }.distinct().sorted()
+    val editionSources = availableSourcesForEdition(selectedEdition)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(6.dp),
@@ -1743,7 +1815,7 @@ private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter
                 MetricTile("Stories", items.size.toString(), Modifier.weight(1f))
                 MetricTile(
                     "Outlets",
-                    if (selectedSource == SourceFilter.ALL) "${visibleSources.size}/${FeedSources.size}" else "1/${FeedSources.size}",
+                    if (selectedSource == SourceFilter.ALL) "${visibleSources.size}/${editionSources.size}" else "1/${editionSources.size}",
                     Modifier.weight(1f),
                 )
             }
@@ -1759,7 +1831,7 @@ private fun CoverageOverview(items: List<FeedItem>, selectedSource: SourceFilter
                     )
                 }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(FeedSources) { source ->
+                    items(editionSources) { source ->
                         val active = source.name in visibleSources
                         SourcePill(source.name.shortSourceName(), active)
                     }
@@ -1782,7 +1854,7 @@ private fun MetricTile(label: String, value: String, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun EmptySection(section: NewsSection) {
+private fun EmptySection(section: NewsSection, edition: NewsEdition = NewsEdition.GB) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(6.dp),
@@ -1792,8 +1864,138 @@ private fun EmptySection(section: NewsSection) {
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = Accent, modifier = Modifier.size(28.dp))
-            TypewriterText(section.emptyText, color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-            TypewriterText("Try refresh, or switch to another menu section.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2)
+            if (edition == NewsEdition.USA && section != NewsSection.SAVED) {
+                TypewriterText(edition.emptyMessage, color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 3)
+                TypewriterText("Check back shortly as US news outlets go live, or use the back arrow above to return to the edition start screen.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2)
+            } else {
+                TypewriterText(section.emptyText, color = Ink, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                TypewriterText("Try refresh, or switch to another menu section.", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditionSelectionScreen(
+    onEditionSelected: (NewsEdition) -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Paper)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BudgieMark()
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    TypewriterText("Welcome to Budgie News", color = Ink, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    TypewriterText("Select your regional edition to continue", color = Muted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            TypewriterText(
+                "Choose between regional editions. Both editions share your saved stories, audio reader preferences, and app notification settings.",
+                color = Muted,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+
+            EditionCard(
+                edition = NewsEdition.GB,
+                statusTag = "Current Edition",
+                description = "Live breaking alerts, headlines, and political coverage from BBC UK, Sky News, The Guardian, and The Sun.",
+                onClick = { onEditionSelected(NewsEdition.GB) },
+            )
+
+            EditionCard(
+                edition = NewsEdition.USA,
+                statusTag = "Foundation Ready",
+                description = "USA regional version. Foundation ready for live US newsroom reporting. Shares bookmarks and settings.",
+                onClick = { onEditionSelected(NewsEdition.USA) },
+            )
+        }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenSettings),
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+            border = BorderStroke(1.dp, AccentSoft),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Rounded.Settings, contentDescription = null, tint = Accent, modifier = Modifier.size(24.dp))
+                    Column {
+                        TypewriterText("Shared App Settings", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        TypewriterText("Configure notifications & location", color = Muted, fontSize = 12.sp, maxLines = 1)
+                    }
+                }
+                TypewriterText("Open →", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditionCard(
+    edition: NewsEdition,
+    statusTag: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        border = BorderStroke(1.5.dp, AccentSoft),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(edition.flag, fontSize = 28.sp)
+                    Column {
+                        TypewriterText(edition.title, color = Ink, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
+                        TypewriterText(edition.subtitle, color = Accent, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                AssistChip(
+                    onClick = onClick,
+                    label = { Text(statusTag, fontSize = 11.sp) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = AccentSoft,
+                        labelColor = Ink,
+                    ),
+                    border = BorderStroke(1.dp, Accent),
+                    shape = RoundedCornerShape(6.dp),
+                )
+            }
+            TypewriterText(description, color = Muted, fontSize = 13.sp, lineHeight = 18.sp)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TypewriterText("Launch ${edition.title} →", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -2045,6 +2247,13 @@ private fun StoryDetail(
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        val activeAds = (houseAds + listOfNotNull(houseAd)).filter { it.isActive }.distinctBy { it.id }
+        if (activeAds.isNotEmpty()) {
+            val ad = activeAds.random()
+            item(key = "story_detail_ad_${ad.id}") {
+                HouseAdBanner(ad)
+            }
+        }
         item {
             RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.78f))
         }
@@ -2216,13 +2425,6 @@ private fun StoryDetail(
                 }
             }
         }
-        val activeAds = (houseAds + listOfNotNull(houseAd)).filter { it.isActive }.distinctBy { it.id }
-        if (activeAds.isNotEmpty()) {
-            val ad = activeAds.random()
-            item(key = "story_detail_ad_${ad.id}") {
-                HouseAdBanner(ad)
-            }
-        }
     }
 }
 
@@ -2276,9 +2478,10 @@ internal fun FeedItem.quickReadPoints(): List<String> {
 
 @Composable
 private fun CoverageRow(item: FeedItem) {
+    val totalSources = FeedSources.count { source -> source.name in item.coverageSources || source.edition == (FeedSources.firstOrNull { it.name == item.source }?.edition ?: NewsEdition.GB) }.coerceAtLeast(1)
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "Covered by ${item.coverageSources.size}/${FeedSources.size}",
+            "Covered by ${item.coverageSources.size}/$totalSources",
             color = Accent,
             fontSize = 12.sp,
             lineHeight = 16.sp,
@@ -2381,17 +2584,24 @@ private suspend fun fetchFeeds(
     sourceFilter: SourceFilter,
     settings: AppSettings,
     query: String = "",
+    edition: NewsEdition = NewsEdition.GB,
 ): FeedState = withContext(Dispatchers.IO) {
     BudgieCache.checkReset(context)
     runCatching {
-        val sources = FeedSources
+        val sources = availableSourcesForEdition(edition)
             .filter { sourceFilter.sourceName == null || it.name == sourceFilter.sourceName }
         val localItems = BudgieArticleDatabase.get(context)
             .recentArticles()
             .map { it.toFeedItem() }
             .filter { isFreeNewsSource(it.source) }
+            .filter { item ->
+                val feedSource = FeedSources.firstOrNull { it.name == item.source }
+                feedSource?.edition == null || feedSource.edition == edition
+            }
             .filter { sourceFilter.sourceName == null || it.source == sourceFilter.sourceName }
         val loadedItems = if (section == NewsSection.SAVED) {
+            emptyList()
+        } else if (sources.isEmpty()) {
             emptyList()
         } else {
             sources
@@ -2411,6 +2621,10 @@ private suspend fun fetchFeeds(
         } else {
             BudgieCache.load(context)
                 .filter { isFreeNewsSource(it.source) }
+                .filter { item ->
+                    val feedSource = FeedSources.firstOrNull { it.name == item.source }
+                    feedSource?.edition == null || feedSource.edition == edition
+                }
                 .filter { item -> sourceFilter.sourceName == null || item.source == sourceFilter.sourceName }
                 .distinctBy { it.link.ifBlank { it.title } }
         }
@@ -2422,10 +2636,7 @@ private suspend fun fetchFeeds(
         val filteredItems = if (section == NewsSection.SAVED) {
             allItems
         } else {
-            allItems
-                .filterFor(section)
-                .take(24)
-                .withCoverageContext()
+            allItems.filterFor(section).take(24).withCoverageContext()
         }
         val searchedItems = if (query.isNotBlank()) {
             filteredItems.filter { item ->
@@ -2437,6 +2648,9 @@ private suspend fun fetchFeeds(
             filteredItems
         }
         if (searchedItems.isEmpty() && section != NewsSection.SAVED && query.isBlank()) {
+            if (sources.isEmpty()) {
+                return@withContext FeedState.Ready(emptyList())
+            }
             val sourceNames = sources.joinToString { it.name }
             error("No stories loaded from $sourceNames")
         }
@@ -2650,13 +2864,13 @@ private fun FeedItem.relatedTo(other: FeedItem): Boolean {
     return overlap >= 3
 }
 
-private fun SourceFilter.tagline(section: NewsSection): String = when (this) {
-    SourceFilter.ALL -> section.tagline
+private fun SourceFilter.tagline(section: NewsSection, edition: NewsEdition = NewsEdition.GB): String = when (this) {
+    SourceFilter.ALL -> if (edition == NewsEdition.USA) "Live breaking alerts, headlines & reporting across the US" else section.tagline
     else -> "${label} ${section.label.lowercase()}"
 }
 
-private fun SourceFilter.sourceNote(): String = when (this) {
-    SourceFilter.ALL -> "Reporting from ${FeedSources.size} leading UK newsrooms"
+private fun SourceFilter.sourceNote(edition: NewsEdition = NewsEdition.GB): String = when (this) {
+    SourceFilter.ALL -> if (edition == NewsEdition.USA) "USA news outlets coming soon! Foundation ready." else "Reporting from ${availableSourcesForEdition(edition).size} leading UK newsrooms"
     else -> "Showing $label stories only"
 }
 
