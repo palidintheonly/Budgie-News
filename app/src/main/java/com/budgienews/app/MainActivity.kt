@@ -42,6 +42,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -2298,18 +2300,27 @@ private fun StoryCard(
                         TypewriterText(item.description, color = Muted, fontSize = 13.sp, maxLines = 2, lineHeight = 19.sp)
                     }
                     CoverageRow(item)
-                    StoryMeta(item)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { onToggleBookmark(item) }) {
-                        Icon(
-                            if (isBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
-                            contentDescription = "Bookmark",
-                            tint = if (isBookmarked) Accent else Muted,
-                            modifier = Modifier.size(18.dp),
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            StoryMeta(item)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { onToggleBookmark(item) }, modifier = Modifier.size(28.dp)) {
+                                Icon(
+                                    if (isBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                                    contentDescription = "Bookmark",
+                                    tint = if (isBookmarked) Accent else Muted,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(16.dp))
+                        }
                     }
-                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Open story", tint = Muted, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -2560,16 +2571,18 @@ internal fun FeedItem.quickReadPoints(): List<String> {
     return points
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CoverageRow(item: FeedItem) {
     val totalSources = FeedSources.count { source -> source.name in item.coverageSources || source.edition == (FeedSources.firstOrNull { it.name == item.source }?.edition ?: NewsEdition.GB) }.coerceAtLeast(1)
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
         Text(
             "Covered by ${item.coverageSources.size}/$totalSources",
             color = Accent,
             fontSize = 12.sp,
             lineHeight = 16.sp,
             fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.align(Alignment.CenterVertically)
         )
         item.coverageSources.take(2).forEach { source ->
             SourcePill(source.shortSourceName(), active = true)
@@ -2588,7 +2601,7 @@ private fun SourcePill(label: String, active: Boolean) {
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
             Text(
                 label,
@@ -2625,7 +2638,7 @@ private fun StoryMeta(item: FeedItem) {
             color = Muted,
             fontSize = 12.sp,
             lineHeight = 16.sp,
-            maxLines = 1,
+            maxLines = 2,
         )
     }
 }
@@ -2906,9 +2919,8 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                         val current = imageUrl
                         if (current == null || current.endsWith(".mp3", ignoreCase = true) || current.endsWith(".mp4", ignoreCase = true) ||
                             cleanExtracted.contains("large", ignoreCase = true) || cleanExtracted.contains("high", ignoreCase = true) ||
-                            cleanExtracted.contains("1024", ignoreCase = true) || cleanExtracted.contains("720", ignoreCase = true) ||
-                            cleanExtracted.endsWith(".jpg", ignoreCase = true) || cleanExtracted.endsWith(".png", ignoreCase = true) ||
-                            cleanExtracted.endsWith(".webp", ignoreCase = true)) {
+                            cleanExtracted.contains("1024", ignoreCase = true) || cleanExtracted.contains("1280", ignoreCase = true) ||
+                            cleanExtracted.contains("1920", ignoreCase = true) || cleanExtracted.contains("3000", ignoreCase = true)) {
                             imageUrl = cleanExtracted
                         }
                     }
@@ -3106,7 +3118,15 @@ private fun String.firstImageUrl(): String? {
             rawUrl.contains("audio/", ignoreCase = true) || rawUrl.contains("video/", ignoreCase = true)) {
             continue
         }
-        val cleanUrl = if (rawUrl.contains("url=", ignoreCase = true) && rawUrl.contains("http", ignoreCase = true)) {
+        val cleanUrl = if (rawUrl.contains("url=", ignoreCase = true) && rawUrl.contains("http", ignoreCase = true) &&
+            !rawUrl.contains("brightspotcdn", ignoreCase = true) && !rawUrl.contains("dims3", ignoreCase = true) &&
+            !rawUrl.contains("npr.org", ignoreCase = true) && !rawUrl.contains("cbsnews", ignoreCase = true) &&
+            !rawUrl.contains("cbsistatic", ignoreCase = true) && !rawUrl.contains("abcnews", ignoreCase = true) &&
+            !rawUrl.contains("turner.com", ignoreCase = true) && !rawUrl.contains("cnn.com", ignoreCase = true) &&
+            !rawUrl.contains("foxnews", ignoreCase = true) && !rawUrl.contains("nytimes", ignoreCase = true) &&
+            !rawUrl.contains("nyt.com", ignoreCase = true) && !rawUrl.contains("bbci", ignoreCase = true) &&
+            !rawUrl.contains("skynews", ignoreCase = true) && !rawUrl.contains("theguardian", ignoreCase = true) &&
+            !rawUrl.contains("thesun", ignoreCase = true)) {
             rawUrl.extractNestedImageUrl()
         } else {
             rawUrl
