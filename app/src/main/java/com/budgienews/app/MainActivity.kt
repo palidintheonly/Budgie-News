@@ -559,10 +559,10 @@ internal object BudgieAccountApi {
                 }
             }
     }
-
-    internal fun String.safeFirestoreId(): String =
-        replace(Regex("[^A-Za-z0-9_-]"), "_").take(140).ifBlank { "unknown-token" }
 }
+
+internal fun String.safeFirestoreId(): String =
+    replace(Regex("[^A-Za-z0-9_-]"), "_").take(140).ifBlank { "unknown-token" }
 
 internal data class AppUpdateConfig(
     val minRequiredVersion: String = "0.1.0-beta",
@@ -710,7 +710,7 @@ internal data class FeedItem(
     val coverageSources: List<String> = listOf(source),
 )
 
-internal enum class NewsEdition(
+enum class NewsEdition(
     val title: String,
     val label: String,
     val subtitle: String,

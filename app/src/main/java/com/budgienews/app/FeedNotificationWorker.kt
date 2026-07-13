@@ -19,21 +19,27 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
-class FeedNotificationWorker(
+open class FeedNotificationWorker(
     context: Context,
     params: WorkerParameters,
+    private val targetEdition: NewsEdition? = null,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        // Always reschedule the next 3-minute check to maintain near-live background checking
-        scheduleNextOneTime(applicationContext)
+        // Always reschedule the next 3-minute check for this worker's region
+        scheduleNextOneTimeForEdition(applicationContext, targetEdition)
 
         // Do not trigger system notifications if the user is actively viewing the app
         if (AppVisibility.isForeground) return@withContext Result.success()
 
         runCatching {
-            // 1. Fetch live news feeds from BBC, Sky, Guardian, and Sun while user is out of the app
-            val liveItems = FeedSources
+            // 1. Fetch live news feeds for the targeted region while user is out of the app
+            val sourcesToFetch = if (targetEdition != null) {
+                FeedSources.filter { it.edition == targetEdition }
+            } else {
+                FeedSources
+            }
+            val liveItems = sourcesToFetch
                 .map { source ->
                     runCatching { fetchFeed(source).take(15) }
                         .onFailure { if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it) }
@@ -119,40 +125,79 @@ class FeedNotificationWorker(
     companion object {
         const val WORK_NAME_PERIODIC = "budgie-feed-notifications-periodic"
         const val WORK_NAME_ONE_TIME = "budgie-feed-notifications-live"
+        const val WORK_NAME_PERIODIC_GB = "budgie-feed-notifications-gb-periodic"
+        const val WORK_NAME_PERIODIC_USA = "budgie-feed-notifications-usa-periodic"
+        const val WORK_NAME_ONE_TIME_GB = "budgie-feed-notifications-gb-live"
+        const val WORK_NAME_ONE_TIME_USA = "budgie-feed-notifications-usa-live"
 
         fun schedule(context: Context) {
-            val periodicRequest = PeriodicWorkRequestBuilder<FeedNotificationWorker>(15, TimeUnit.MINUTES)
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
-                )
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
+            val gbRequest = PeriodicWorkRequestBuilder<GbFeedNotificationWorker>(15, TimeUnit.MINUTES)
+                .setConstraints(constraints)
+                .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                WORK_NAME_PERIODIC,
+                WORK_NAME_PERIODIC_GB,
                 ExistingPeriodicWorkPolicy.KEEP,
-                periodicRequest
+                gbRequest,
+            )
+
+            val usaRequest = PeriodicWorkRequestBuilder<UsaFeedNotificationWorker>(15, TimeUnit.MINUTES)
+                .setConstraints(constraints)
+                .build()
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                WORK_NAME_PERIODIC_USA,
+                ExistingPeriodicWorkPolicy.KEEP,
+                usaRequest,
             )
 
             scheduleNextOneTime(context)
         }
 
         fun scheduleNextOneTime(context: Context) {
-            val oneTimeRequest = OneTimeWorkRequestBuilder<FeedNotificationWorker>()
-                .setInitialDelay(3, TimeUnit.MINUTES)
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
-                )
+            scheduleNextOneTimeForEdition(context, null)
+        }
+
+        fun scheduleNextOneTimeForEdition(context: Context, edition: NewsEdition?) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                WORK_NAME_ONE_TIME,
-                ExistingWorkPolicy.REPLACE,
-                oneTimeRequest
-            )
+            if (edition == NewsEdition.GB || edition == null) {
+                val gbOneTime = OneTimeWorkRequestBuilder<GbFeedNotificationWorker>()
+                    .setInitialDelay(3, TimeUnit.MINUTES)
+                    .setConstraints(constraints)
+                    .build()
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    WORK_NAME_ONE_TIME_GB,
+                    ExistingWorkPolicy.REPLACE,
+                    gbOneTime,
+                )
+            }
+
+            if (edition == NewsEdition.USA || edition == null) {
+                val usaOneTime = OneTimeWorkRequestBuilder<UsaFeedNotificationWorker>()
+                    .setInitialDelay(3, TimeUnit.MINUTES)
+                    .setConstraints(constraints)
+                    .build()
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    WORK_NAME_ONE_TIME_USA,
+                    ExistingWorkPolicy.REPLACE,
+                    usaOneTime,
+                )
+            }
         }
     }
 }
+
+class GbFeedNotificationWorker(
+    context: Context,
+    params: WorkerParameters,
+) : FeedNotificationWorker(context, params, NewsEdition.GB)
+
+class UsaFeedNotificationWorker(
+    context: Context,
+    params: WorkerParameters,
+) : FeedNotificationWorker(context, params, NewsEdition.USA)
