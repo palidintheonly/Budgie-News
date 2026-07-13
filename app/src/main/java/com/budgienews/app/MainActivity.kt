@@ -242,6 +242,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+internal fun Throwable.isExpectedFirestoreMissingError(): Boolean {
+    if (this is com.google.firebase.firestore.FirebaseFirestoreException) {
+        return code == com.google.firebase.firestore.FirebaseFirestoreException.Code.NOT_FOUND ||
+            code == com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAVAILABLE ||
+            code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
+    }
+    val msg = message.orEmpty() + " " + (cause?.message.orEmpty())
+    return (msg.contains("NOT_FOUND", ignoreCase = true) && msg.contains("database", ignoreCase = true)) ||
+        msg.contains("The database (default) does not exist", ignoreCase = true) ||
+        msg.contains("PERMISSION_DENIED", ignoreCase = true) ||
+        msg.contains("UNAVAILABLE", ignoreCase = true)
+}
+
 private object BudgieFirebase {
     @Suppress("DEPRECATION")
     fun setup(context: Context) {
@@ -255,7 +268,7 @@ private object BudgieFirebase {
                 BudgiePrefs.deviceToken(context).takeIf { it.isNotBlank() }?.let { token ->
                     BudgieAccountApi.registerDevice(context, token)
                 }
-            }.onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+            }.onFailure { if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it) }
         }
         Firebase.remoteConfig.setConfigSettingsAsync(
             remoteConfigSettings {
@@ -272,11 +285,11 @@ private object BudgieFirebase {
                         BudgieAccountApi.ensureSession()
                         BudgieAccountApi.registerDevice(context, token)
                     }
-                        .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                        .onFailure { if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it) }
                 }
             }
         }.addOnFailureListener { error ->
-            FirebaseCrashlytics.getInstance().recordException(error)
+            if (!error.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(error)
         }
     }
 }
@@ -505,6 +518,11 @@ internal object BudgieAccountApi {
             .limit(50)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    if (error.isExpectedFirestoreMissingError()) {
+                        liveArticleRegistration?.remove()
+                        liveArticleRegistration = null
+                        return@addSnapshotListener
+                    }
                     FirebaseCrashlytics.getInstance().recordException(error)
                     return@addSnapshotListener
                 }
@@ -561,6 +579,11 @@ internal object BudgieVersionCheck {
                 .document("version")
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
+                        if (error.isExpectedFirestoreMissingError()) {
+                            registration?.remove()
+                            registration = null
+                            return@addSnapshotListener
+                        }
                         FirebaseCrashlytics.getInstance().recordException(error)
                         return@addSnapshotListener
                     }
@@ -665,7 +688,7 @@ private object BudgieCache {
                 )
             }
         }.getOrElse {
-            FirebaseCrashlytics.getInstance().recordException(it)
+            if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it)
             emptyList()
         }
     }
@@ -701,7 +724,7 @@ internal enum class NewsEdition(
         label = "USA News",
         subtitle = "United States Edition",
         flag = "🇺🇸",
-        emptyMessage = "USA news outlets are coming soon! We're building the foundations for live coverage from leading US newsrooms."
+        emptyMessage = "No USA news stories matched the current filters."
     )
 }
 
@@ -842,7 +865,7 @@ private fun NewsApp() {
             BudgiePrefs.saveAndSync(context, updated)
             BudgiePrefs.deviceToken(context).takeIf { it.isNotBlank() }?.let { token ->
                 runCatching { BudgieAccountApi.registerDevice(context, token) }
-                    .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                    .onFailure { if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it) }
             }
         }
     }
@@ -1962,15 +1985,15 @@ private fun EditionSelectionScreen(
 
             EditionCard(
                 edition = NewsEdition.GB,
-                statusTag = "Current Edition",
+                statusTag = "Explore GB News Feeds →",
                 description = "Live breaking alerts, headlines, and political coverage from BBC UK, Sky News, The Guardian, and The Sun.",
                 onClick = { onEditionSelected(NewsEdition.GB) },
             )
 
             EditionCard(
                 edition = NewsEdition.USA,
-                statusTag = "Foundation Ready",
-                description = "USA regional version. Foundation ready for live US newsroom reporting. Shares bookmarks and settings.",
+                statusTag = "Explore USA News Feeds →",
+                description = "Live breaking alerts, headlines, and political coverage from NPR, CBS, ABC, CNN, Fox News, and NYT.",
                 onClick = { onEditionSelected(NewsEdition.USA) },
             )
         }
@@ -2810,8 +2833,11 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
 
         when (parser.name.lowercase()) {
             "title" -> title = parser.readText()
-            "description" -> description = parser.readText().stripHtml()
-            "summary" -> description = parser.readText().stripHtml()
+            "description", "summary" -> {
+                val rawText = parser.readText()
+                if (imageUrl == null) imageUrl = rawText.firstImageUrl()
+                description = rawText.stripHtml()
+            }
             "link" -> {
                 val href = parser.attributeValue("href")
                 if (href.isNullOrBlank()) {
@@ -2826,11 +2852,21 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                 pubDate = rawPubDate.formatNewsDate()
             }
             "source" -> source = parser.readText().ifBlank { source }
-            "enclosure" -> imageUrl = parser.attributeValue("url") ?: imageUrl
-            "thumbnail", "media:thumbnail", "media:content" -> imageUrl = parser.attributeValue("url") ?: imageUrl
+            "media:group", "image" -> {
+                // Do not skipTag; enter tag to find nested media:content, media:thumbnail, or url tags
+            }
+            "enclosure", "thumbnail", "media:thumbnail", "media:content", "url" -> {
+                val extractedUrl = parser.attributeValue("url")
+                    ?: parser.attributeValue("href")
+                    ?: runCatching { parser.readText() }.getOrNull()?.takeIf { it.startsWith("http", ignoreCase = true) }
+                if (extractedUrl != null && (imageUrl == null || extractedUrl.contains("large", ignoreCase = true) || extractedUrl.contains("high", ignoreCase = true) || extractedUrl.endsWith(".jpg", ignoreCase = true) || extractedUrl.endsWith(".png", ignoreCase = true) || extractedUrl.endsWith(".webp", ignoreCase = true))) {
+                    imageUrl = extractedUrl
+                }
+                if (parser.eventType == XmlPullParser.START_TAG) parser.skipTag()
+            }
             "content:encoded", "content" -> {
                 val encodedContent = parser.readText()
-                imageUrl = encodedContent.firstImageUrl() ?: imageUrl
+                if (imageUrl == null) imageUrl = encodedContent.firstImageUrl()
                 if (description.isBlank()) description = encodedContent.stripHtml()
             }
             else -> parser.skipTag()
@@ -2988,7 +3024,7 @@ private fun String.stripHtml(): String =
         .trim()
 
 private fun String.firstImageUrl(): String? {
-    val match = Regex("""<img[^>]+src=['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(this)
+    val match = Regex("""<(?:img|media)[^>]+(?:src|data-src|url)=['"]?([^'"\s>]+)['"]?""", RegexOption.IGNORE_CASE).find(this)
     val rawUrl = match?.groupValues?.getOrNull(1)?.replace("&amp;", "&") ?: return null
     return rawUrl.extractNestedImageUrl()
 }
@@ -3076,7 +3112,7 @@ private fun sendDiscordWebhook(
     conn.disconnect()
     responseCode in 200..299
 }.onFailure {
-    FirebaseCrashlytics.getInstance().recordException(it)
+    if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it)
 }.getOrDefault(false)
 
 @Composable

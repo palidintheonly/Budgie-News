@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 (USA News Outlets, Push Notifications & Regional Settings)
+## v1.2.0 (USA News Outlets, Push Notifications & Regional Settings)
 
 - **6 Free USA News Outlets & Push Notifications**: Wired up live coverage from 6 major free US newsrooms (`NPR`, `CBS News`, `ABC News`, `CNN`, `Fox News`, `NYT News`) across Main and Politics RSS feeds (`FeedSources` and `SourceFilter`). Integrated USA background polling (`FeedNotificationWorker`) and device push notifications (`BudgieMessagingService` & `BudgieAccountApi.registerDevice`), syncing regional default choices (`defaultUsaSource` & `defaultGbSource`) to cloud push services.
 - **Location Tracking & Permission Removal**: Completely removed `ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION` permissions from `AndroidManifest.xml`. Stripped out internal `LocationManager` providers, location permission dialog launchers, and UK region inference (`Location.toUkRegion()`), keeping the app lightweight and focused strictly on regional news feeds without requiring device location.
