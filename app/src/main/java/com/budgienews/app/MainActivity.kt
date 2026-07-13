@@ -2643,26 +2643,42 @@ private fun StoryMeta(item: FeedItem) {
     }
 }
 
+private fun fallbackLogoResForSource(source: String): Int? = when {
+    source.contains("BBC", ignoreCase = true) -> R.drawable.logo_bbc
+    source.contains("Sky", ignoreCase = true) -> R.drawable.logo_sky
+    source.contains("Guardian", ignoreCase = true) -> R.drawable.logo_guardian
+    source.contains("Sun", ignoreCase = true) -> R.drawable.logo_sun
+    source.contains("NPR", ignoreCase = true) -> R.drawable.logo_npr
+    source.contains("CBS", ignoreCase = true) -> R.drawable.logo_cbs
+    source.contains("ABC", ignoreCase = true) -> R.drawable.logo_abc
+    source.contains("CNN", ignoreCase = true) -> R.drawable.logo_cnn
+    source.contains("Fox", ignoreCase = true) -> R.drawable.logo_fox
+    source.contains("NYT", ignoreCase = true) || source.contains("Times", ignoreCase = true) -> R.drawable.logo_nyt
+    else -> null
+}
+
 private fun fallbackLogoForSource(source: String): String? = when {
-    source.contains("BBC", ignoreCase = true) -> "https://m.bbc.co.uk/news/special/2015/newsspec_10857/bbc_news_logo.png"
-    source.contains("Sky", ignoreCase = true) -> "https://news.sky.com/resources/sky-news-logo.png"
-    source.contains("Guardian", ignoreCase = true) -> "https://assets.guim.co.uk/images/guardian-logo-rss.png"
-    source.contains("Sun", ignoreCase = true) -> "https://www.thesun.co.uk/wp-content/uploads/2021/08/the-sun-logo-1.png"
-    source.contains("NPR", ignoreCase = true) -> "https://media.npr.org/images/podcasts/primary/npr_generic_image_300.jpg"
-    source.contains("CBS", ignoreCase = true) -> "https://www.cbsnews.com/fly/bundles/cbsnewscore/images/cbs-news-social-default.png"
-    source.contains("ABC", ignoreCase = true) -> "https://s.abcnews.com/images/Site/abc_news_default_png_16x9_1600.png"
-    source.contains("CNN", ignoreCase = true) -> "https://media.cnn.com/api/v1/images/stellar/prod/cnn-logo-social.png"
-    source.contains("Fox", ignoreCase = true) -> "https://global.fncstatic.com/static/orion/styles/img/fox-news/og/og-fox-news.png"
-    source.contains("NYT", ignoreCase = true) || source.contains("Times", ignoreCase = true) -> "https://static01.nyt.com/images/icons/t_logo_291_black.png"
+    source.contains("BBC", ignoreCase = true) -> "fallback://BBC"
+    source.contains("Sky", ignoreCase = true) -> "fallback://Sky"
+    source.contains("Guardian", ignoreCase = true) -> "fallback://Guardian"
+    source.contains("Sun", ignoreCase = true) -> "fallback://Sun"
+    source.contains("NPR", ignoreCase = true) -> "fallback://NPR"
+    source.contains("CBS", ignoreCase = true) -> "fallback://CBS"
+    source.contains("ABC", ignoreCase = true) -> "fallback://ABC"
+    source.contains("CNN", ignoreCase = true) -> "fallback://CNN"
+    source.contains("Fox", ignoreCase = true) -> "fallback://Fox"
+    source.contains("NYT", ignoreCase = true) || source.contains("Times", ignoreCase = true) -> "fallback://NYT"
     else -> null
 }
 
 @Composable
 private fun RemoteImage(url: String?, modifier: Modifier = Modifier, source: String = "") {
+    val fallbackRes = fallbackLogoResForSource(source)
     val fallbackUrl = fallbackLogoForSource(source)
-    val effectiveUrl = url ?: fallbackUrl
-    var loadFailed by remember(effectiveUrl) { mutableStateOf(false) }
-    val displayUrl = if (loadFailed && fallbackUrl != null) fallbackUrl else effectiveUrl
+    val isFallbackUrl = url != null && url.startsWith("fallback://")
+    val effectiveModel: Any? = if (url != null && !isFallbackUrl) url else (fallbackRes ?: fallbackUrl)
+    var loadFailed by remember(url, source) { mutableStateOf(false) }
+    val displayModel: Any? = if (loadFailed && fallbackRes != null) fallbackRes else effectiveModel
     val infiniteTransition = rememberInfiniteTransition(label = "imagePlaceholderPulse")
     val pulse by infiniteTransition.animateFloat(
         initialValue = 0.65f,
@@ -2685,7 +2701,7 @@ private fun RemoteImage(url: String?, modifier: Modifier = Modifier, source: Str
                 .graphicsLayer(alpha = pulse),
         )
         AsyncImage(
-            model = displayUrl,
+            model = displayModel,
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
