@@ -248,11 +248,16 @@ internal fun Throwable.isExpectedFirestoreMissingError(): Boolean {
             code == com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAVAILABLE ||
             code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
     }
+    if (this is java.net.SocketTimeoutException || this is java.net.UnknownHostException || this is java.net.ConnectException || this is java.io.InterruptedIOException) {
+        return true
+    }
     val msg = message.orEmpty() + " " + (cause?.message.orEmpty())
     return (msg.contains("NOT_FOUND", ignoreCase = true) && msg.contains("database", ignoreCase = true)) ||
         msg.contains("The database (default) does not exist", ignoreCase = true) ||
         msg.contains("PERMISSION_DENIED", ignoreCase = true) ||
-        msg.contains("UNAVAILABLE", ignoreCase = true)
+        msg.contains("UNAVAILABLE", ignoreCase = true) ||
+        msg.contains("No stories loaded from", ignoreCase = true) ||
+        msg.contains("returned HTTP", ignoreCase = true)
 }
 
 private object BudgieFirebase {
@@ -2684,7 +2689,7 @@ private suspend fun fetchFeeds(
             sources
                 .map { source ->
                     runCatching { fetchFeed(source).take(12) }
-                        .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                        .onFailure { if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it) }
                         .getOrDefault(emptyList())
                 }
                 .interleaved()
@@ -2737,7 +2742,7 @@ private suspend fun fetchFeeds(
             FeedState.Ready(items)
         },
         onFailure = {
-            FirebaseCrashlytics.getInstance().recordException(it)
+            if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it)
             FeedState.Error(it.message ?: "Unexpected feed error")
         },
     )
@@ -2859,8 +2864,8 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                 val extractedUrl = parser.attributeValue("url")
                     ?: parser.attributeValue("href")
                     ?: runCatching { parser.readText() }.getOrNull()?.takeIf { it.startsWith("http", ignoreCase = true) }
-                if (extractedUrl != null && (imageUrl == null || extractedUrl.contains("large", ignoreCase = true) || extractedUrl.contains("high", ignoreCase = true) || extractedUrl.endsWith(".jpg", ignoreCase = true) || extractedUrl.endsWith(".png", ignoreCase = true) || extractedUrl.endsWith(".webp", ignoreCase = true))) {
-                    imageUrl = extractedUrl
+                if (extractedUrl != null && !extractedUrl.contains("pixel", ignoreCase = true) && !extractedUrl.contains("tracking", ignoreCase = true) && !extractedUrl.contains("beacon", ignoreCase = true) && (imageUrl == null || extractedUrl.contains("large", ignoreCase = true) || extractedUrl.contains("high", ignoreCase = true) || extractedUrl.endsWith(".jpg", ignoreCase = true) || extractedUrl.endsWith(".png", ignoreCase = true) || extractedUrl.endsWith(".webp", ignoreCase = true))) {
+                    imageUrl = extractedUrl.replaceFirst("http://", "https://")
                 }
                 if (parser.eventType == XmlPullParser.START_TAG) parser.skipTag()
             }
@@ -2876,6 +2881,10 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
     val pubMillis = rawPubDate.toEpochMillisOrNull()
     if (pubMillis != null && pubMillis < BudgieTime.minAllowedMillis()) return null
 
+    val cleanImageUrl = imageUrl
+        ?.takeIf { !it.contains("pixel", ignoreCase = true) && !it.contains("tracking", ignoreCase = true) && !it.contains("beacon", ignoreCase = true) && !it.endsWith(".gif", ignoreCase = true) }
+        ?.replaceFirst("http://", "https://")
+
     return FeedItem(
         id = link.ifBlank { title },
         title = title.stripHtml().ifBlank { "Untitled story" },
@@ -2883,7 +2892,7 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
         link = link,
         source = source.stripHtml(),
         publishedAt = pubDate,
-        imageUrl = imageUrl,
+        imageUrl = cleanImageUrl,
     )
 }
 
@@ -3024,13 +3033,24 @@ private fun String.stripHtml(): String =
         .trim()
 
 private fun String.firstImageUrl(): String? {
-    val match = Regex("""<(?:img|media)[^>]+(?:src|data-src|url)=['"]?([^'"\s>]+)['"]?""", RegexOption.IGNORE_CASE).find(this)
-    val rawUrl = match?.groupValues?.getOrNull(1)?.replace("&amp;", "&") ?: return null
-    return rawUrl.extractNestedImageUrl()
+    val matches = Regex("""<(?:img|media)[^>]+(?:src|data-src|url)=['"]?([^'"\s>]+)['"]?""", RegexOption.IGNORE_CASE).findAll(this)
+    for (match in matches) {
+        val rawUrl = match.groupValues.getOrNull(1)?.replace("&amp;", "&") ?: continue
+        if (rawUrl.contains("pixel", ignoreCase = true) || rawUrl.contains("tracking", ignoreCase = true) || rawUrl.contains("beacon", ignoreCase = true) || rawUrl.contains("1x1", ignoreCase = true) || rawUrl.endsWith(".gif", ignoreCase = true)) {
+            continue
+        }
+        val cleanUrl = if (rawUrl.contains("brightspotcdn", ignoreCase = true) || rawUrl.contains("dims3", ignoreCase = true) || rawUrl.startsWith("https://", ignoreCase = true)) {
+            rawUrl
+        } else {
+            rawUrl.extractNestedImageUrl()
+        }
+        return cleanUrl.replaceFirst("http://", "https://")
+    }
+    return null
 }
 
 private fun String.extractNestedImageUrl(): String {
-    val nestedUrl = Uri.parse(this).getQueryParameter("url")
+    val nestedUrl = runCatching { Uri.parse(this).getQueryParameter("url") }.getOrNull()
     return if (nestedUrl.isNullOrBlank()) this else URLDecoder.decode(nestedUrl, Charsets.UTF_8.name())
 }
 
