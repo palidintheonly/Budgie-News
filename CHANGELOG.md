@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 (Location Removal & Dedicated Default Outlets Page)
+
+- **Location Tracking & Permission Removal**: Completely removed `ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION` permissions from `AndroidManifest.xml`. Stripped out internal `LocationManager` providers, location permission dialog launchers, and UK region inference (`Location.toUkRegion()`), keeping the app lightweight and focused strictly on regional news feeds without requiring device location.
+- **Dedicated Default Outlets Page (`DefaultOutletsScreen`)**: Created a separate, dedicated regional startup settings screen (`DefaultOutletsScreen`) accessible from `Shared App Settings` → `Default news outlets`. Users can configure default startup newsroom feeds independently for **GB News** (`defaultGbSource`) and **USA News** (`defaultUsaSource`) backed by per-edition SharedPreferences.
+- **Startup Card UI Refinements**: Refined regional edition selection cards to display `"Explore GB News Feeds →"` and `"Explore USA News Feeds →"`, ensuring clarity and distinguishing the regional UK news edition from any individual outlet named GB News.
+
 ## 1.0.2 (Regional Editions & Startup Screen)
 
 - **2-Button Startup Screen (`EditionSelectionScreen`)**: Added an initial region selection screen displayed on app startup when an edition has not been selected yet. Presents two rich, prominent option cards for **GB News** (`🇬🇧`) and **USA News** (`🇺🇸`), while sharing the unified app settings page (`Shared App Settings`), audio reader preferences, and saved bookmarks.

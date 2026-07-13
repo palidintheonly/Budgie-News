@@ -397,6 +397,8 @@ internal object BudgiePrefs {
     private const val KEY_HEADLINES = "headlines_notifications"
     private const val KEY_SECTION = "default_section"
     private const val KEY_SOURCE = "default_source"
+    private const val KEY_GB_SOURCE = "default_gb_source"
+    private const val KEY_USA_SOURCE = "default_usa_source"
     private const val KEY_LOCATION = "uk_location"
     private const val KEY_SEND_STATS = "send_stats"
     private const val KEY_DEVICE_TOKEN = "device_token"
@@ -411,6 +413,10 @@ internal object BudgiePrefs {
             headlinesNotificationsEnabled = prefs.getBoolean(KEY_HEADLINES, true),
             defaultSection = prefs.getString(KEY_SECTION, null)?.let { runCatching { NewsSection.valueOf(it) }.getOrNull() } ?: NewsSection.HEADLINES,
             defaultSource = prefs.getString(KEY_SOURCE, null)?.let { runCatching { SourceFilter.valueOf(it) }.getOrNull() } ?: SourceFilter.ALL,
+            defaultGbSource = prefs.getString(KEY_GB_SOURCE, null)?.let { runCatching { SourceFilter.valueOf(it) }.getOrNull() }
+                ?: prefs.getString(KEY_SOURCE, null)?.let { runCatching { SourceFilter.valueOf(it) }.getOrNull() }
+                ?: SourceFilter.ALL,
+            defaultUsaSource = prefs.getString(KEY_USA_SOURCE, null)?.let { runCatching { SourceFilter.valueOf(it) }.getOrNull() } ?: SourceFilter.ALL,
             ukLocation = prefs.getString(KEY_LOCATION, "United Kingdom").orEmpty(),
             sendAppStatistics = prefs.getBoolean(KEY_SEND_STATS, true),
         )
@@ -424,6 +430,8 @@ internal object BudgiePrefs {
             .putBoolean(KEY_HEADLINES, settings.headlinesNotificationsEnabled)
             .putString(KEY_SECTION, settings.defaultSection.name)
             .putString(KEY_SOURCE, settings.defaultSource.name)
+            .putString(KEY_GB_SOURCE, settings.defaultGbSource.name)
+            .putString(KEY_USA_SOURCE, settings.defaultUsaSource.name)
             .putString(KEY_LOCATION, settings.ukLocation)
             .putBoolean(KEY_SEND_STATS, settings.sendAppStatistics)
             .apply()
@@ -695,6 +703,8 @@ internal data class AppSettings(
     val headlinesNotificationsEnabled: Boolean = true,
     val defaultSection: NewsSection = NewsSection.HEADLINES,
     val defaultSource: SourceFilter = SourceFilter.ALL,
+    val defaultGbSource: SourceFilter = SourceFilter.ALL,
+    val defaultUsaSource: SourceFilter = SourceFilter.ALL,
     val ukLocation: String = "United Kingdom",
     val sendAppStatistics: Boolean = true,
 )
@@ -768,6 +778,7 @@ private fun NewsApp() {
     var selectedSource by remember { mutableStateOf(settings.defaultSource) }
     var selectedItem by remember { mutableStateOf<FeedItem?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var defaultOutletsOpen by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     var houseAd by remember { mutableStateOf<HouseAd?>(null) }
     var houseAds by remember { mutableStateOf<List<HouseAd>>(emptyList()) }
@@ -781,10 +792,12 @@ private fun NewsApp() {
     }
     val scope = rememberCoroutineScope()
 
-    BackHandler(enabled = selectedItem != null || settingsOpen || searchOpen || selectedEdition != null) {
+    BackHandler(enabled = selectedItem != null || defaultOutletsOpen || settingsOpen || searchOpen || selectedEdition != null) {
         if (selectedItem != null) {
             selectedItem = null
             BudgieAudioReader.stop()
+        } else if (defaultOutletsOpen) {
+            defaultOutletsOpen = false
         } else if (settingsOpen) {
             settingsOpen = false
         } else if (searchOpen) {
@@ -886,7 +899,10 @@ private fun NewsApp() {
                             Spacer(Modifier.size(10.dp))
                             Column {
                                 val currentEdition = selectedEdition
-                                if (currentEdition == null) {
+                                if (defaultOutletsOpen) {
+                                    TypewriterText("Default News Outlets", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    TypewriterText("Regional startup preferences", color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                                } else if (currentEdition == null) {
                                     TypewriterText("Budgie News", color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                     TypewriterText("Select Regional Edition", color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
                                 } else {
@@ -898,11 +914,11 @@ private fun NewsApp() {
                     }
                 },
                 actions = {
-                    if (selectedEdition == null && !settingsOpen) {
+                    if (selectedEdition == null && !settingsOpen && !defaultOutletsOpen) {
                         IconButton(onClick = { settingsOpen = true }) {
                             Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = Ink)
                         }
-                    } else if (selectedItem == null && !settingsOpen && selectedEdition != null) {
+                    } else if (selectedItem == null && !settingsOpen && !defaultOutletsOpen && selectedEdition != null) {
                         IconButton(onClick = {
                             if (searchOpen) {
                                 searchOpen = false
@@ -922,11 +938,13 @@ private fun NewsApp() {
                     }
                 },
                 navigationIcon = {
-                    if (selectedItem != null || settingsOpen || searchOpen || selectedEdition != null) {
+                    if (selectedItem != null || defaultOutletsOpen || settingsOpen || searchOpen || selectedEdition != null) {
                         IconButton(onClick = {
                             if (selectedItem != null) {
                                 selectedItem = null
                                 BudgieAudioReader.stop()
+                            } else if (defaultOutletsOpen) {
+                                defaultOutletsOpen = false
                             } else if (settingsOpen) {
                                 settingsOpen = false
                             } else if (searchOpen) {
@@ -947,17 +965,25 @@ private fun NewsApp() {
         },
     ) { padding ->
         val detailItem = selectedItem
-        if (settingsOpen) {
+        if (defaultOutletsOpen) {
+            DefaultOutletsScreen(
+                settings = settings,
+                onSettingsChanged = ::saveSettings,
+                selectedEdition = selectedEdition,
+                modifier = Modifier.padding(padding),
+            )
+        } else if (settingsOpen) {
             SettingsScreen(
                 settings = settings,
                 onSettingsChanged = ::saveSettings,
+                onOpenDefaultOutlets = { defaultOutletsOpen = true },
                 modifier = Modifier.padding(padding),
             )
         } else if (selectedEdition == null) {
             EditionSelectionScreen(
                 onEditionSelected = { edition ->
                     selectedEdition = edition
-                    selectedSource = SourceFilter.ALL
+                    selectedSource = if (edition == NewsEdition.GB) settings.defaultGbSource else settings.defaultUsaSource
                 },
                 onOpenSettings = { settingsOpen = true },
                 modifier = Modifier.padding(padding),
@@ -1075,6 +1101,7 @@ private fun NewsApp() {
 private fun SettingsScreen(
     settings: AppSettings,
     onSettingsChanged: (AppSettings) -> Unit,
+    onOpenDefaultOutlets: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1089,11 +1116,10 @@ private fun SettingsScreen(
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         item {
-            SettingsChoiceRow(
-                title = "Default outlet",
-                description = "Choose the outlet shown first when Budgie News opens",
-                value = settings.defaultSource.label,
-                options = SourceFilter.entries.map { it.label to { onSettingsChanged(settings.copy(defaultSource = it)) } },
+            SettingsRow(
+                title = "Default news outlets",
+                description = "Configure separate startup newsrooms for GB News and USA News editions",
+                onClick = onOpenDefaultOutlets,
             )
         }
         item {
@@ -1352,6 +1378,73 @@ private fun SettingsScreen(
             },
             containerColor = Paper,
         )
+    }
+}
+
+@Composable
+private fun DefaultOutletsScreen(
+    settings: AppSettings,
+    onSettingsChanged: (AppSettings) -> Unit,
+    selectedEdition: NewsEdition?,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Paper),
+        contentPadding = PaddingValues(vertical = 8.dp),
+    ) {
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                BudgieText("Regional Startup Feeds", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                BudgieText(
+                    "Choose which newsroom outlet loads automatically when you launch each regional edition of Budgie News.",
+                    color = Muted,
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp,
+                )
+            }
+            HorizontalDivider(color = Accent, thickness = 1.dp)
+        }
+        item {
+            SettingsChoiceRow(
+                title = "🇬🇧 GB News Default Outlet",
+                description = "Choose the UK newsroom shown first when you open the GB edition",
+                value = settings.defaultGbSource.label,
+                options = availableFiltersForEdition(NewsEdition.GB).map { filter ->
+                    filter.label to {
+                        onSettingsChanged(
+                            settings.copy(
+                                defaultGbSource = filter,
+                                defaultSource = if (selectedEdition == NewsEdition.GB) filter else settings.defaultSource,
+                            ),
+                        )
+                    }
+                },
+            )
+        }
+        item {
+            SettingsChoiceRow(
+                title = "🇺🇸 USA News Default Outlet",
+                description = "Choose the US newsroom shown first when you open the USA edition",
+                value = settings.defaultUsaSource.label,
+                options = availableFiltersForEdition(NewsEdition.USA).map { filter ->
+                    filter.label to {
+                        onSettingsChanged(
+                            settings.copy(
+                                defaultUsaSource = filter,
+                                defaultSource = if (selectedEdition == NewsEdition.USA) filter else settings.defaultSource,
+                            ),
+                        )
+                    }
+                },
+            )
+        }
     }
 }
 
