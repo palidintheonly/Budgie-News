@@ -2,28 +2,19 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
+    // Allow client read and write access for device push token registration
+    match /deviceTokens/{token} {
+      allow read, write: if true;
     }
 
+    // Allow client read and write for live breaking news articles
     match /articles/{articleId} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if true;
     }
 
-    match /config/{document=**} {
-      allow read: if signedIn();
-      allow write: if signedIn();
-    }
-
-    match /users/{userId} {
-      allow read, write: if signedIn() && request.auth.uid == userId;
-    }
-
-    match /deviceTokens/{tokenId} {
-      allow read: if false;
-      allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid;
-      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    // Allow client read and write for version monitoring / remote config
+    match /config/{configId} {
+      allow read, write: if true;
     }
   }
 }

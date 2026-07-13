@@ -46,11 +46,13 @@ class FeedNotificationWorker(
             val breakingLive = liveItems.filterFor(NewsSection.BREAKING)
             breakingLive.firstOrNull()?.let { topBreaking ->
                 BudgieNotifications.notifyNewArticle(applicationContext, topBreaking, NewsSection.BREAKING)
+                publishLiveArticleToFirestore(topBreaking, NewsSection.BREAKING)
             }
 
             val importantLive = liveItems.filterFor(NewsSection.IMPORTANT)
             importantLive.firstOrNull()?.let { topImportant ->
                 BudgieNotifications.notifyNewArticle(applicationContext, topImportant, NewsSection.IMPORTANT)
+                publishLiveArticleToFirestore(topImportant, NewsSection.IMPORTANT)
             }
 
             // 2. Also check Firestore articles collection for backend alerts
@@ -91,6 +93,27 @@ class FeedNotificationWorker(
             if (!error.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(error)
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
+    }
+
+    private suspend fun publishLiveArticleToFirestore(item: FeedItem, section: NewsSection) {
+        runCatching {
+            val articleMap = mapOf(
+                "articleId" to item.id,
+                "title" to item.title,
+                "description" to item.description,
+                "link" to item.link,
+                "source" to item.source,
+                "publishedAt" to item.publishedAt,
+                "publishedAtMillis" to System.currentTimeMillis(),
+                "imageUrl" to item.imageUrl,
+                "category" to section.label,
+                "isRead" to false,
+            )
+            Firebase.firestore.collection("articles")
+                .document(item.id.safeFirestoreId())
+                .set(articleMap)
+                .await()
+        }.onFailure { if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it) }
     }
 
     companion object {

@@ -560,7 +560,7 @@ internal object BudgieAccountApi {
             }
     }
 
-    private fun String.safeFirestoreId(): String =
+    internal fun String.safeFirestoreId(): String =
         replace(Regex("[^A-Za-z0-9_-]"), "_").take(140).ifBlank { "unknown-token" }
 }
 
