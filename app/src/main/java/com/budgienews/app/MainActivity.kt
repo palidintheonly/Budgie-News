@@ -2617,24 +2617,6 @@ internal fun LocalArticle.toFeedItem(): FeedItem =
         coverageSources = listOf(source),
     )
 
-private fun Location.toUkRegion(): String {
-    val lat = latitude
-    val lon = longitude
-    return when {
-        lat in 55.0..59.0 && lon in -8.5..-0.5 -> "Scotland"
-        lat in 51.2..53.6 && lon in -5.8..-2.5 -> "Wales"
-        lat in 54.0..55.4 && lon in -8.3..-5.3 -> "Northern Ireland"
-        lat in 51.0..51.8 && lon in -0.8..0.4 -> "London"
-        lat in 53.0..55.0 && lon in -3.8..-1.5 -> "North West"
-        lat in 54.5..55.9 && lon in -2.4..-0.5 -> "North East"
-        lat in 53.3..54.6 && lon in -2.5..0.2 -> "Yorkshire"
-        lat in 52.0..53.4 && lon in -3.2..-0.5 -> "Midlands"
-        lat in 50.6..52.2 && lon in -1.8..1.8 -> "South East"
-        lat in 49.8..52.1 && lon in -6.5..-1.8 -> "South West"
-        else -> "United Kingdom"
-    }
-}
-
 private fun List<List<FeedItem>>.interleaved(): List<FeedItem> {
     val result = mutableListOf<FeedItem>()
     val maxSize = maxOfOrNull { it.size } ?: return result
