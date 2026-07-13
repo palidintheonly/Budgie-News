@@ -9,8 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationManager
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
@@ -178,29 +176,9 @@ internal val FeedSources = listOf(
     FeedSource("The Sun News", "https://www.thesun.co.uk/news/feed/"),
 )
 
-private val UkLocationOptions = listOf(
-    "United Kingdom",
-    "England",
-    "Scotland",
-    "Wales",
-    "Northern Ireland",
-    "London",
-    "North West",
-    "North East",
-    "Yorkshire",
-    "Midlands",
-    "South East",
-    "South West",
-)
-
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-
-    private val locationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            updateLocationPreference()
-        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -241,7 +219,6 @@ class MainActivity : ComponentActivity() {
 
     private fun requestRequiredPermissionsIfNeeded() {
         requestNotificationPermissionIfNeeded()
-        requestLocationPermissionIfNeeded()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -251,39 +228,6 @@ class MainActivity : ComponentActivity() {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
-
-    private fun requestLocationPermissionIfNeeded() {
-        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (hasCoarse || hasFine) {
-            updateLocationPreference()
-        } else {
-            locationPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                ),
-            )
-        }
-    }
-
-    private fun updateLocationPreference() {
-        val location = bestLastKnownLocation() ?: return
-        val current = BudgiePrefs.load(this)
-        BudgiePrefs.save(this, current.copy(ukLocation = location.toUkRegion()))
-    }
-
-    private fun bestLastKnownLocation(): Location? {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
-        ) return null
-
-        val manager = getSystemService(LocationManager::class.java)
-        return manager.getProviders(true)
-            .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
-            .maxByOrNull { it.time }
-    }
-
 }
 
 private object BudgieFirebase {
@@ -1146,16 +1090,6 @@ private fun SettingsScreen(
     ) {
         item {
             SettingsChoiceRow(
-                title = "Location",
-                description = "GB/UK only location-based news preference",
-                value = settings.ukLocation,
-                options = UkLocationOptions.map { location ->
-                    location to { onSettingsChanged(settings.copy(ukLocation = location)) }
-                },
-            )
-        }
-        item {
-            SettingsChoiceRow(
                 title = "Default outlet",
                 description = "Choose the outlet shown first when Budgie News opens",
                 value = settings.defaultSource.label,
@@ -1940,7 +1874,7 @@ private fun EditionSelectionScreen(
                     Icon(Icons.Rounded.Settings, contentDescription = null, tint = Accent, modifier = Modifier.size(24.dp))
                     Column {
                         TypewriterText("Shared App Settings", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        TypewriterText("Configure notifications & location", color = Muted, fontSize = 12.sp, maxLines = 1)
+                        TypewriterText("Configure notifications & defaults", color = Muted, fontSize = 12.sp, maxLines = 1)
                     }
                 }
                 TypewriterText("Open →", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -1994,7 +1928,7 @@ private fun EditionCard(
             }
             TypewriterText(description, color = Muted, fontSize = 13.sp, lineHeight = 18.sp)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TypewriterText("Launch ${edition.title} →", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                TypewriterText("Explore ${edition.label} Feeds →", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
