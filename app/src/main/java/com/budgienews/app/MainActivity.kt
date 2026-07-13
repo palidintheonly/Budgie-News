@@ -168,12 +168,24 @@ private val AccentSoft = Color(0xFF27272A)
 private val Alert = Color(0xFFD4D4D8)
 
 internal val FeedSources = listOf(
-    FeedSource("BBC UK", "https://feeds.bbci.co.uk/news/uk/rss.xml"),
-    FeedSource("Sky News UK", "https://feeds.skynews.com/feeds/rss/uk.xml"),
-    FeedSource("Sky Politics", "https://feeds.skynews.com/feeds/rss/politics.xml"),
-    FeedSource("Guardian UK", "https://www.theguardian.com/uk/rss"),
-    FeedSource("Guardian Politics", "https://www.theguardian.com/politics/rss"),
-    FeedSource("The Sun News", "https://www.thesun.co.uk/news/feed/"),
+    FeedSource("BBC UK", "https://feeds.bbci.co.uk/news/uk/rss.xml", NewsEdition.GB),
+    FeedSource("Sky News UK", "https://feeds.skynews.com/feeds/rss/uk.xml", NewsEdition.GB),
+    FeedSource("Sky Politics", "https://feeds.skynews.com/feeds/rss/politics.xml", NewsEdition.GB),
+    FeedSource("Guardian UK", "https://www.theguardian.com/uk/rss", NewsEdition.GB),
+    FeedSource("Guardian Politics", "https://www.theguardian.com/politics/rss", NewsEdition.GB),
+    FeedSource("The Sun News", "https://www.thesun.co.uk/news/feed/", NewsEdition.GB),
+    FeedSource("NPR News", "https://feeds.npr.org/1001/rss.xml", NewsEdition.USA),
+    FeedSource("NPR Politics", "https://feeds.npr.org/1014/rss.xml", NewsEdition.USA),
+    FeedSource("CBS News", "https://www.cbsnews.com/latest/rss/main", NewsEdition.USA),
+    FeedSource("CBS Politics", "https://www.cbsnews.com/latest/rss/politics", NewsEdition.USA),
+    FeedSource("ABC News", "https://abcnews.go.com/abcnews/topstories", NewsEdition.USA),
+    FeedSource("ABC Politics", "https://abcnews.go.com/abcnews/politicsheadlines", NewsEdition.USA),
+    FeedSource("CNN News", "http://rss.cnn.com/rss/cnn_topstories.rss", NewsEdition.USA),
+    FeedSource("CNN Politics", "http://rss.cnn.com/rss/cnn_allpolitics.rss", NewsEdition.USA),
+    FeedSource("Fox News", "https://moxie.foxnews.com/google-publisher/latest.xml", NewsEdition.USA),
+    FeedSource("Fox Politics", "https://moxie.foxnews.com/google-publisher/politics.xml", NewsEdition.USA),
+    FeedSource("NYT News", "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", NewsEdition.USA),
+    FeedSource("NYT Politics", "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml", NewsEdition.USA),
 )
 
 class MainActivity : ComponentActivity() {
@@ -473,6 +485,8 @@ internal object BudgieAccountApi {
             "breakingNotificationsEnabled" to settings.breakingNotificationsEnabled,
             "importantNotificationsEnabled" to settings.importantNotificationsEnabled,
             "headlinesNotificationsEnabled" to settings.headlinesNotificationsEnabled,
+            "defaultGbSource" to settings.defaultGbSource.name,
+            "defaultUsaSource" to settings.defaultUsaSource.name,
             "updatedAt" to FieldValue.serverTimestamp(),
             "platform" to "android",
         )
@@ -717,6 +731,18 @@ internal enum class SourceFilter(val label: String, val sourceName: String?, val
     GUARDIAN("Guardian", "Guardian UK", NewsEdition.GB),
     GUARDIAN_POLITICS("Guard Pol", "Guardian Politics", NewsEdition.GB),
     SUN("Sun", "The Sun News", NewsEdition.GB),
+    NPR("NPR", "NPR News", NewsEdition.USA),
+    NPR_POLITICS("NPR Pol", "NPR Politics", NewsEdition.USA),
+    CBS("CBS", "CBS News", NewsEdition.USA),
+    CBS_POLITICS("CBS Pol", "CBS Politics", NewsEdition.USA),
+    ABC("ABC", "ABC News", NewsEdition.USA),
+    ABC_POLITICS("ABC Pol", "ABC Politics", NewsEdition.USA),
+    CNN("CNN", "CNN News", NewsEdition.USA),
+    CNN_POLITICS("CNN Pol", "CNN Politics", NewsEdition.USA),
+    FOX("Fox", "Fox News", NewsEdition.USA),
+    FOX_POLITICS("Fox Pol", "Fox Politics", NewsEdition.USA),
+    NYT("NYT", "NYT News", NewsEdition.USA),
+    NYT_POLITICS("NYT Pol", "NYT Politics", NewsEdition.USA),
 }
 
 internal fun availableSourcesForEdition(edition: NewsEdition?): List<FeedSource> {
@@ -1177,7 +1203,7 @@ private fun SettingsScreen(
         }
         item {
             SettingsRow(
-                title = "What's new in v1.1.1",
+                title = "What's new in v1.2.0",
                 description = "View the latest release highlights and performance improvements.",
                 onClick = { showChangelogDialog = true },
             )
@@ -1351,13 +1377,14 @@ private fun SettingsScreen(
 
     if (showChangelogDialog) {
         val changelogItems = listOf(
+            "6 Free USA News Outlets & Push Notifications" to "Wired up live coverage from 6 major free US newsrooms (NPR, CBS News, ABC News, CNN, Fox News, NYT News) across Main and Politics RSS feeds (FeedSources and SourceFilter). Integrated USA background polling (FeedNotificationWorker) and device push notifications (BudgieMessagingService & BudgieAccountApi.registerDevice), syncing regional default choices (defaultUsaSource & defaultGbSource) to cloud push services.",
             "Location Tracking & Permission Removal" to "Completely removed ACCESS_COARSE_LOCATION and ACCESS_FINE_LOCATION permissions from AndroidManifest.xml. Stripped out internal LocationManager providers, location permission dialog launchers, and UK region inference (Location.toUkRegion()), keeping the app lightweight and focused strictly on regional news feeds without requiring device location.",
             "Dedicated Default Outlets Page (DefaultOutletsScreen)" to "Created a separate, dedicated regional startup settings screen (DefaultOutletsScreen) accessible from Shared App Settings → Default news outlets. Users can configure default startup newsroom feeds independently for GB News (defaultGbSource) and USA News (defaultUsaSource) backed by per-edition SharedPreferences.",
             "Startup Card UI Refinements" to "Refined regional edition selection cards to display \"Explore GB News Feeds →\" and \"Explore USA News Feeds →\", ensuring clarity and distinguishing the regional UK news edition from any individual outlet named GB News.",
         )
         AlertDialog(
             onDismissRequest = { showChangelogDialog = false },
-            title = { BudgieText("What's new in v1.1.1", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold) },
+            title = { BudgieText("What's new in v1.2.0", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -2694,7 +2721,8 @@ private suspend fun fetchFeeds(
 }
 
 internal fun isFreeNewsSource(source: String): Boolean {
-    val paywalled = listOf("Financial Times", "FT", "Independent", "Indy", "Daily Mail", "Mail Online", "Mail+", "Telegraph", "Times")
+    if (source.contains("NYT", ignoreCase = true) || source.contains("New York Times", ignoreCase = true)) return true
+    val paywalled = listOf("Financial Times", "FT", "Independent", "Indy", "Daily Mail", "Mail Online", "Mail+", "Telegraph", "The Times", "Times UK")
     return paywalled.none { source.contains(it, ignoreCase = true) }
 }
 
@@ -2879,7 +2907,7 @@ private fun SourceFilter.tagline(section: NewsSection, edition: NewsEdition = Ne
 }
 
 private fun SourceFilter.sourceNote(edition: NewsEdition = NewsEdition.GB): String = when (this) {
-    SourceFilter.ALL -> if (edition == NewsEdition.USA) "USA news outlets coming soon! Foundation ready." else "Reporting from ${availableSourcesForEdition(edition).size} leading UK newsrooms"
+    SourceFilter.ALL -> if (edition == NewsEdition.USA) "Reporting from ${availableSourcesForEdition(edition).size} leading US newsrooms" else "Reporting from ${availableSourcesForEdition(edition).size} leading UK newsrooms"
     else -> "Showing $label stories only"
 }
 
@@ -2888,6 +2916,12 @@ private fun String.shortSourceName(): String = when {
     contains("Sky", ignoreCase = true) -> "Sky"
     contains("Guardian", ignoreCase = true) -> "Guardian"
     contains("Sun", ignoreCase = true) -> "Sun"
+    contains("NPR", ignoreCase = true) -> "NPR"
+    contains("CBS", ignoreCase = true) -> "CBS"
+    contains("ABC", ignoreCase = true) -> "ABC"
+    contains("CNN", ignoreCase = true) -> "CNN"
+    contains("Fox", ignoreCase = true) -> "Fox"
+    contains("NYT", ignoreCase = true) || contains("Times", ignoreCase = true) -> "NYT"
     else -> this
 }
 
