@@ -2111,7 +2111,7 @@ private fun LeadStory(
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column {
-                RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.72f))
+                RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.72f), item.source)
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TypewriterText("Top Story | ${section.label}", color = Accent, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     TypewriterText(item.title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp, maxLines = 4)
@@ -2293,7 +2293,7 @@ private fun StoryCard(
             elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 2.dp else 0.dp),
         ) {
             Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                RemoteImage(item.imageUrl, Modifier.size(92.dp).clip(RoundedCornerShape(6.dp)))
+                RemoteImage(item.imageUrl, Modifier.size(92.dp).clip(RoundedCornerShape(6.dp)), item.source)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     TypewriterText(item.title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, lineHeight = 23.sp)
                     if (item.description.isNotBlank()) {
@@ -2350,7 +2350,7 @@ private fun StoryDetail(
             }
         }
         item {
-            RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.78f))
+            RemoteImage(item.imageUrl, Modifier.fillMaxWidth().aspectRatio(1.78f), item.source)
         }
         item {
             Card(
@@ -2643,8 +2643,26 @@ private fun StoryMeta(item: FeedItem) {
     }
 }
 
+private fun fallbackLogoForSource(source: String): String? = when {
+    source.contains("BBC", ignoreCase = true) -> "https://m.bbc.co.uk/news/special/2015/newsspec_10857/bbc_news_logo.png"
+    source.contains("Sky", ignoreCase = true) -> "https://news.sky.com/resources/sky-news-logo.png"
+    source.contains("Guardian", ignoreCase = true) -> "https://assets.guim.co.uk/images/guardian-logo-rss.png"
+    source.contains("Sun", ignoreCase = true) -> "https://www.thesun.co.uk/wp-content/uploads/2021/08/the-sun-logo-1.png"
+    source.contains("NPR", ignoreCase = true) -> "https://media.npr.org/images/podcasts/primary/npr_generic_image_300.jpg"
+    source.contains("CBS", ignoreCase = true) -> "https://www.cbsnews.com/fly/bundles/cbsnewscore/images/cbs-news-social-default.png"
+    source.contains("ABC", ignoreCase = true) -> "https://s.abcnews.com/images/Site/abc_news_default_png_16x9_1600.png"
+    source.contains("CNN", ignoreCase = true) -> "https://media.cnn.com/api/v1/images/stellar/prod/cnn-logo-social.png"
+    source.contains("Fox", ignoreCase = true) -> "https://global.fncstatic.com/static/orion/styles/img/fox-news/og/og-fox-news.png"
+    source.contains("NYT", ignoreCase = true) || source.contains("Times", ignoreCase = true) -> "https://static01.nyt.com/images/icons/t_logo_291_black.png"
+    else -> null
+}
+
 @Composable
-private fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
+private fun RemoteImage(url: String?, modifier: Modifier = Modifier, source: String = "") {
+    val fallbackUrl = fallbackLogoForSource(source)
+    val effectiveUrl = url ?: fallbackUrl
+    var loadFailed by remember(effectiveUrl) { mutableStateOf(false) }
+    val displayUrl = if (loadFailed && fallbackUrl != null) fallbackUrl else effectiveUrl
     val infiniteTransition = rememberInfiniteTransition(label = "imagePlaceholderPulse")
     val pulse by infiniteTransition.animateFloat(
         initialValue = 0.65f,
@@ -2667,10 +2685,11 @@ private fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
                 .graphicsLayer(alpha = pulse),
         )
         AsyncImage(
-            model = url,
+            model = displayUrl,
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
+            onError = { loadFailed = true },
         )
     }
 }
@@ -2872,7 +2891,7 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
             "description", "summary" -> {
                 val rawText = parser.readText()
                 val descImg = rawText.firstImageUrl()
-                if (descImg != null && (imageUrl == null || imageUrl.endsWith(".mp3", ignoreCase = true) || imageUrl.endsWith(".mp4", ignoreCase = true) || descImg.contains("large", ignoreCase = true) || descImg.contains("high", ignoreCase = true))) {
+                if (descImg != null && (imageUrl == null || imageUrl.endsWith(".mp3", ignoreCase = true) || imageUrl.endsWith(".mp4", ignoreCase = true) || imageUrl.contains("generic", ignoreCase = true) || imageUrl.contains("logo", ignoreCase = true) || descImg.contains("large", ignoreCase = true) || descImg.contains("high", ignoreCase = true) || descImg.contains("brightspotcdn", ignoreCase = true) || descImg.contains("cbsnews", ignoreCase = true))) {
                     imageUrl = descImg
                 }
                 description = rawText.stripHtml()
@@ -2891,10 +2910,10 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                 pubDate = rawPubDate.formatNewsDate()
             }
             "source" -> source = parser.readText().ifBlank { source }
-            "media:group", "image" -> {
+            "media:group" -> {
                 // Do not skipTag; enter tag to find nested media:content, media:thumbnail, or url tags
             }
-            "enclosure", "thumbnail", "media:thumbnail", "media:content", "url" -> {
+            "enclosure", "thumbnail", "media:thumbnail", "media:content", "url", "image" -> {
                 val typeAttr = parser.attributeValue("type") ?: ""
                 val mediumAttr = parser.attributeValue("medium") ?: ""
                 if (!typeAttr.contains("audio", ignoreCase = true) && !typeAttr.contains("video", ignoreCase = true) &&
@@ -2918,6 +2937,8 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                         
                         val current = imageUrl
                         if (current == null || current.endsWith(".mp3", ignoreCase = true) || current.endsWith(".mp4", ignoreCase = true) ||
+                            current.contains("generic", ignoreCase = true) || current.contains("logo", ignoreCase = true) ||
+                            current.contains("60x60", ignoreCase = true) || current.contains("thumb", ignoreCase = true) ||
                             cleanExtracted.contains("large", ignoreCase = true) || cleanExtracted.contains("high", ignoreCase = true) ||
                             cleanExtracted.contains("1024", ignoreCase = true) || cleanExtracted.contains("1280", ignoreCase = true) ||
                             cleanExtracted.contains("1920", ignoreCase = true) || cleanExtracted.contains("3000", ignoreCase = true)) {
@@ -2930,7 +2951,7 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
             "content:encoded", "content" -> {
                 val encodedContent = parser.readText()
                 val encodedImg = encodedContent.firstImageUrl()
-                if (encodedImg != null && (imageUrl == null || imageUrl.endsWith(".mp3", ignoreCase = true) || imageUrl.endsWith(".mp4", ignoreCase = true) || encodedImg.contains("large", ignoreCase = true) || encodedImg.contains("high", ignoreCase = true))) {
+                if (encodedImg != null && (imageUrl == null || imageUrl.endsWith(".mp3", ignoreCase = true) || imageUrl.endsWith(".mp4", ignoreCase = true) || imageUrl.contains("generic", ignoreCase = true) || imageUrl.contains("logo", ignoreCase = true) || imageUrl.contains("60x60", ignoreCase = true) || encodedImg.contains("large", ignoreCase = true) || encodedImg.contains("high", ignoreCase = true) || encodedImg.contains("brightspotcdn", ignoreCase = true) || encodedImg.contains("cbsnews", ignoreCase = true))) {
                     imageUrl = encodedImg
                 }
                 if (description.isBlank()) description = encodedContent.stripHtml()
@@ -2953,12 +2974,18 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
             !it.endsWith(".m4a", ignoreCase = true)
         }
         ?.let { url ->
-            if (url.startsWith("http://", ignoreCase = true) && !url.contains("turner.com", ignoreCase = true) && !url.contains("cnn.com", ignoreCase = true)) {
-                url.replaceFirst("http://", "https://")
+            val upgraded = if (url.contains("cbsnewsstatic.com", ignoreCase = true) || url.contains("cbsnews.com", ignoreCase = true)) {
+                url.replace(Regex("/thumbnail/\\d+x\\d+/"), "/thumbnail/1200x630/")
             } else {
                 url
             }
+            if (upgraded.startsWith("http://", ignoreCase = true) && !upgraded.contains("turner.com", ignoreCase = true) && !upgraded.contains("cnn.com", ignoreCase = true)) {
+                upgraded.replaceFirst("http://", "https://")
+            } else {
+                upgraded
+            }
         }
+        ?: fallbackLogoForSource(source)
 
     return FeedItem(
         id = link.ifBlank { title },
