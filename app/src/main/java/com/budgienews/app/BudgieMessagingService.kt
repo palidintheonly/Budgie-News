@@ -80,7 +80,7 @@ class BudgieMessagingService : FirebaseMessagingService() {
                 runCatching {
                     BudgieAccountApi.ensureSession()
                     BudgieAccountApi.registerDevice(applicationContext, token)
-                }.onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                }.onFailure { if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it) }
             }
         }
     }

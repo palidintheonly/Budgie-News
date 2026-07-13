@@ -35,7 +35,7 @@ class ArticleSyncWorker(
         }.fold(
             onSuccess = { Result.success() },
             onFailure = { error ->
-                FirebaseCrashlytics.getInstance().recordException(error)
+                if (!error.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(error)
                 if (runAttemptCount < 3) Result.retry() else Result.failure()
             },
         )

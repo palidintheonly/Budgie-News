@@ -36,7 +36,7 @@ class FeedNotificationWorker(
             val liveItems = FeedSources
                 .map { source ->
                     runCatching { fetchFeed(source).take(15) }
-                        .onFailure { FirebaseCrashlytics.getInstance().recordException(it) }
+                        .onFailure { if (!it.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(it) }
                         .getOrDefault(emptyList())
                 }
                 .flatten()
@@ -88,7 +88,7 @@ class FeedNotificationWorker(
             }
             Result.success()
         }.getOrElse { error ->
-            FirebaseCrashlytics.getInstance().recordException(error)
+            if (!error.isExpectedFirestoreMissingError()) FirebaseCrashlytics.getInstance().recordException(error)
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
     }
