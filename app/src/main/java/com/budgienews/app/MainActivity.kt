@@ -1177,7 +1177,7 @@ private fun SettingsScreen(
         }
         item {
             SettingsRow(
-                title = "What's new in v1.0.1",
+                title = "What's new in v1.1.1",
                 description = "View the latest release highlights and performance improvements.",
                 onClick = { showChangelogDialog = true },
             )
@@ -1351,13 +1351,13 @@ private fun SettingsScreen(
 
     if (showChangelogDialog) {
         val changelogItems = listOf(
-            "GAID & Package ID Check" to "Queries Google Advertising ID off main thread (`AdvertisingIdClient`) when fetching house ads, respecting `isLimitAdTrackingEnabled` opt-outs, and corrects `REGISTERED_PACKAGE_NAME` verification to `com.monkeybytes.budgienews`.",
-            "Randomized Ad Rotation" to "Replaces static (`ads.first()`) and deterministic modulus selection across all ad banner slots (`NewsList`, `StoryDetail`) with true random campaign selection (`activeAds.random()`) across refreshes.",
-            "Full Native Ad Shape UI" to "Upgrades `HouseAdBanner` to render `icon_url` thumbnail, `headline`, `advertiser`, `body` text, `star_rating`, `media_url`, and a `call_to_action` button (`Learn More` fallback) in proper visual hierarchy."
+            "Location Tracking & Permission Removal" to "Completely removed ACCESS_COARSE_LOCATION and ACCESS_FINE_LOCATION permissions from AndroidManifest.xml. Stripped out internal LocationManager providers, location permission dialog launchers, and UK region inference (Location.toUkRegion()), keeping the app lightweight and focused strictly on regional news feeds without requiring device location.",
+            "Dedicated Default Outlets Page (DefaultOutletsScreen)" to "Created a separate, dedicated regional startup settings screen (DefaultOutletsScreen) accessible from Shared App Settings → Default news outlets. Users can configure default startup newsroom feeds independently for GB News (defaultGbSource) and USA News (defaultUsaSource) backed by per-edition SharedPreferences.",
+            "Startup Card UI Refinements" to "Refined regional edition selection cards to display \"Explore GB News Feeds →\" and \"Explore USA News Feeds →\", ensuring clarity and distinguishing the regional UK news edition from any individual outlet named GB News.",
         )
         AlertDialog(
             onDismissRequest = { showChangelogDialog = false },
-            title = { BudgieText("What's new in v1.0.1", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold) },
+            title = { BudgieText("What's new in v1.1.1", color = Ink, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
