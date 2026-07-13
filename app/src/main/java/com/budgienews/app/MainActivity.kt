@@ -1406,9 +1406,11 @@ private fun SettingsScreen(
     if (showChangelogDialog) {
         val changelogItems = listOf(
             "6 Free USA News Outlets & Push Notifications" to "Wired up live coverage from 6 major free US newsrooms (NPR, CBS News, ABC News, CNN, Fox News, NYT News) across Main and Politics RSS feeds (FeedSources and SourceFilter). Integrated USA background polling (FeedNotificationWorker) and device push notifications (BudgieMessagingService & BudgieAccountApi.registerDevice), syncing regional default choices (defaultUsaSource & defaultGbSource) to cloud push services.",
-            "Location Tracking & Permission Removal" to "Completely removed ACCESS_COARSE_LOCATION and ACCESS_FINE_LOCATION permissions from AndroidManifest.xml. Stripped out internal LocationManager providers, location permission dialog launchers, and UK region inference (Location.toUkRegion()), keeping the app lightweight and focused strictly on regional news feeds without requiring device location.",
-            "Dedicated Default Outlets Page (DefaultOutletsScreen)" to "Created a separate, dedicated regional startup settings screen (DefaultOutletsScreen) accessible from Shared App Settings → Default news outlets. Users can configure default startup newsroom feeds independently for GB News (defaultGbSource) and USA News (defaultUsaSource) backed by per-edition SharedPreferences.",
-            "Startup Card UI Refinements" to "Refined regional edition selection cards to display \"Explore GB News Feeds →\" and \"Explore USA News Feeds →\", ensuring clarity and distinguishing the regional UK news edition from any individual outlet named GB News.",
+            "Separate Regional Background Workers" to "Split background feed polling into distinct regional workers (GbFeedNotificationWorker and UsaFeedNotificationWorker) so GB and USA feeds check independently and fast without scanning all 12 outlets sequentially.",
+            "USA Image Thumbnail & Enclosure Sanitization" to "Filtered out audio/podcast .mp3/.mp4 enclosures on NPR/CBS, rejected 1x1 tracking GIFs, and retained Turner/CNN cleartext HTTP endpoints for reliable thumbnail extraction across all USA feeds.",
+            "Badge Sizing & Full USA Brand Color Palette" to "Upgraded source pills from capped raw text (92.dp max) to uniform surface badges (minHeight = 24.dp) and added custom brand colors across NPR, CBS, ABC, CNN, Fox News, and NYT.",
+            "Dedicated Default Outlets Page (DefaultOutletsScreen)" to "Created a separate, dedicated regional startup settings screen accessible from Shared App Settings → Default news outlets to configure startup newsroom feeds independently for GB and USA.",
+            "Location Tracking & Permission Removal" to "Completely removed ACCESS_COARSE_LOCATION and ACCESS_FINE_LOCATION permissions from AndroidManifest.xml and stripped out internal LocationManager providers.",
         )
         AlertDialog(
             onDismissRequest = { showChangelogDialog = false },
@@ -2578,38 +2580,54 @@ private fun CoverageRow(item: FeedItem) {
 @Composable
 private fun SourcePill(label: String, active: Boolean) {
     val (bgColor, textColor) = if (active) brandColors(label) else AccentSoft to Muted
-    Text(
-        label,
-        color = textColor,
-        fontSize = 11.sp,
-        lineHeight = 15.sp,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
-            .widthIn(max = 92.dp)
-            .background(bgColor, RoundedCornerShape(6.dp))
-            .padding(horizontal = 7.dp, vertical = 4.dp),
-    )
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = bgColor,
+        border = BorderStroke(1.dp, if (active) bgColor else AccentSoft),
+        modifier = Modifier.heightIn(min = 24.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        ) {
+            Text(
+                label,
+                color = textColor,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 private fun brandColors(label: String): Pair<Color, Color> = when {
     label.contains("BBC", ignoreCase = true) -> Color(0xFFB80000) to Ink
-    label.contains("Sky", ignoreCase = true) -> Color(0xFF0015A8) to Ink
+    label.contains("Sky", ignoreCase = true) -> Color(0xFF003399) to Ink
     label.contains("Guard", ignoreCase = true) -> Color(0xFF052962) to Ink
     label.contains("Sun", ignoreCase = true) -> Color(0xFFED1C24) to Ink
+    label.contains("NPR", ignoreCase = true) -> Color(0xFF1A5E9A) to Ink
+    label.contains("CBS", ignoreCase = true) -> Color(0xFF003366) to Ink
+    label.contains("ABC", ignoreCase = true) -> Color(0xFF1E4E79) to Ink
+    label.contains("CNN", ignoreCase = true) -> Color(0xFFCC0000) to Ink
+    label.contains("Fox", ignoreCase = true) -> Color(0xFF002244) to Ink
+    label.contains("NYT", ignoreCase = true) || label.contains("Times", ignoreCase = true) -> Color(0xFF222222) to Ink
     else -> Accent to Ink
 }
 
 @Composable
 private fun StoryMeta(item: FeedItem) {
-    TypewriterText(
-        listOf(item.source, item.publishedAt).filter { it.isNotBlank() }.joinToString("  |  "),
-        color = Muted,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
-        maxLines = 1,
-    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        TypewriterText(
+            listOf(item.source, item.publishedAt).filter { it.isNotBlank() }.joinToString("  |  "),
+            color = Muted,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            maxLines = 1,
+        )
+    }
 }
 
 @Composable
@@ -2840,7 +2858,10 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
             "title" -> title = parser.readText()
             "description", "summary" -> {
                 val rawText = parser.readText()
-                if (imageUrl == null) imageUrl = rawText.firstImageUrl()
+                val descImg = rawText.firstImageUrl()
+                if (descImg != null && (imageUrl == null || imageUrl.endsWith(".mp3", ignoreCase = true) || imageUrl.endsWith(".mp4", ignoreCase = true) || descImg.contains("large", ignoreCase = true) || descImg.contains("high", ignoreCase = true))) {
+                    imageUrl = descImg
+                }
                 description = rawText.stripHtml()
             }
             "link" -> {
@@ -2861,17 +2882,45 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                 // Do not skipTag; enter tag to find nested media:content, media:thumbnail, or url tags
             }
             "enclosure", "thumbnail", "media:thumbnail", "media:content", "url" -> {
-                val extractedUrl = parser.attributeValue("url")
-                    ?: parser.attributeValue("href")
-                    ?: runCatching { parser.readText() }.getOrNull()?.takeIf { it.startsWith("http", ignoreCase = true) }
-                if (extractedUrl != null && !extractedUrl.contains("pixel", ignoreCase = true) && !extractedUrl.contains("tracking", ignoreCase = true) && !extractedUrl.contains("beacon", ignoreCase = true) && (imageUrl == null || extractedUrl.contains("large", ignoreCase = true) || extractedUrl.contains("high", ignoreCase = true) || extractedUrl.endsWith(".jpg", ignoreCase = true) || extractedUrl.endsWith(".png", ignoreCase = true) || extractedUrl.endsWith(".webp", ignoreCase = true))) {
-                    imageUrl = extractedUrl.replaceFirst("http://", "https://")
+                val typeAttr = parser.attributeValue("type") ?: ""
+                val mediumAttr = parser.attributeValue("medium") ?: ""
+                if (!typeAttr.contains("audio", ignoreCase = true) && !typeAttr.contains("video", ignoreCase = true) &&
+                    !mediumAttr.equals("audio", ignoreCase = true) && !mediumAttr.equals("video", ignoreCase = true)) {
+                    val extractedUrl = parser.attributeValue("url")
+                        ?: parser.attributeValue("href")
+                        ?: parser.attributeValue("src")
+                        ?: runCatching { parser.readText() }.getOrNull()?.takeIf { it.startsWith("http", ignoreCase = true) }
+                    if (extractedUrl != null && !extractedUrl.endsWith(".mp3", ignoreCase = true) &&
+                        !extractedUrl.endsWith(".mp4", ignoreCase = true) && !extractedUrl.endsWith(".m4a", ignoreCase = true) &&
+                        !extractedUrl.endsWith(".wav", ignoreCase = true) && !extractedUrl.endsWith(".aac", ignoreCase = true) &&
+                        !extractedUrl.contains("audio/", ignoreCase = true) && !extractedUrl.contains("video/", ignoreCase = true) &&
+                        !extractedUrl.contains("pixel", ignoreCase = true) && !extractedUrl.contains("tracking", ignoreCase = true) &&
+                        !extractedUrl.contains("beacon", ignoreCase = true) && !extractedUrl.endsWith(".gif", ignoreCase = true)) {
+                        
+                        val cleanExtracted = if (extractedUrl.startsWith("http://", ignoreCase = true) && !extractedUrl.contains("turner.com", ignoreCase = true) && !extractedUrl.contains("cnn.com", ignoreCase = true)) {
+                            extractedUrl.replaceFirst("http://", "https://")
+                        } else {
+                            extractedUrl
+                        }
+                        
+                        val current = imageUrl
+                        if (current == null || current.endsWith(".mp3", ignoreCase = true) || current.endsWith(".mp4", ignoreCase = true) ||
+                            cleanExtracted.contains("large", ignoreCase = true) || cleanExtracted.contains("high", ignoreCase = true) ||
+                            cleanExtracted.contains("1024", ignoreCase = true) || cleanExtracted.contains("720", ignoreCase = true) ||
+                            cleanExtracted.endsWith(".jpg", ignoreCase = true) || cleanExtracted.endsWith(".png", ignoreCase = true) ||
+                            cleanExtracted.endsWith(".webp", ignoreCase = true)) {
+                            imageUrl = cleanExtracted
+                        }
+                    }
                 }
                 if (parser.eventType == XmlPullParser.START_TAG) parser.skipTag()
             }
             "content:encoded", "content" -> {
                 val encodedContent = parser.readText()
-                if (imageUrl == null) imageUrl = encodedContent.firstImageUrl()
+                val encodedImg = encodedContent.firstImageUrl()
+                if (encodedImg != null && (imageUrl == null || imageUrl.endsWith(".mp3", ignoreCase = true) || imageUrl.endsWith(".mp4", ignoreCase = true) || encodedImg.contains("large", ignoreCase = true) || encodedImg.contains("high", ignoreCase = true))) {
+                    imageUrl = encodedImg
+                }
                 if (description.isBlank()) description = encodedContent.stripHtml()
             }
             else -> parser.skipTag()
@@ -2882,8 +2931,22 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
     if (pubMillis != null && pubMillis < BudgieTime.minAllowedMillis()) return null
 
     val cleanImageUrl = imageUrl
-        ?.takeIf { !it.contains("pixel", ignoreCase = true) && !it.contains("tracking", ignoreCase = true) && !it.contains("beacon", ignoreCase = true) && !it.endsWith(".gif", ignoreCase = true) }
-        ?.replaceFirst("http://", "https://")
+        ?.takeIf {
+            !it.contains("pixel", ignoreCase = true) &&
+            !it.contains("tracking", ignoreCase = true) &&
+            !it.contains("beacon", ignoreCase = true) &&
+            !it.endsWith(".gif", ignoreCase = true) &&
+            !it.endsWith(".mp3", ignoreCase = true) &&
+            !it.endsWith(".mp4", ignoreCase = true) &&
+            !it.endsWith(".m4a", ignoreCase = true)
+        }
+        ?.let { url ->
+            if (url.startsWith("http://", ignoreCase = true) && !url.contains("turner.com", ignoreCase = true) && !url.contains("cnn.com", ignoreCase = true)) {
+                url.replaceFirst("http://", "https://")
+            } else {
+                url
+            }
+        }
 
     return FeedItem(
         id = link.ifBlank { title },
@@ -3033,18 +3096,26 @@ private fun String.stripHtml(): String =
         .trim()
 
 private fun String.firstImageUrl(): String? {
-    val matches = Regex("""<(?:img|media)[^>]+(?:src|data-src|url)=['"]?([^'"\s>]+)['"]?""", RegexOption.IGNORE_CASE).findAll(this)
+    val matches = Regex("""<(?:img|media|figure)[^>]+(?:src|data-src|data-original|url)=['"]?([^'"\s>]+)['"]?""", RegexOption.IGNORE_CASE).findAll(this)
     for (match in matches) {
-        val rawUrl = match.groupValues.getOrNull(1)?.replace("&amp;", "&") ?: continue
-        if (rawUrl.contains("pixel", ignoreCase = true) || rawUrl.contains("tracking", ignoreCase = true) || rawUrl.contains("beacon", ignoreCase = true) || rawUrl.contains("1x1", ignoreCase = true) || rawUrl.endsWith(".gif", ignoreCase = true)) {
+        val rawUrl = match.groupValues.getOrNull(1)?.replace("&amp;", "&")?.trim() ?: continue
+        if (rawUrl.contains("pixel", ignoreCase = true) || rawUrl.contains("tracking", ignoreCase = true) ||
+            rawUrl.contains("beacon", ignoreCase = true) || rawUrl.contains("1x1", ignoreCase = true) ||
+            rawUrl.endsWith(".gif", ignoreCase = true) || rawUrl.endsWith(".mp3", ignoreCase = true) ||
+            rawUrl.endsWith(".mp4", ignoreCase = true) || rawUrl.endsWith(".m4a", ignoreCase = true) ||
+            rawUrl.contains("audio/", ignoreCase = true) || rawUrl.contains("video/", ignoreCase = true)) {
             continue
         }
-        val cleanUrl = if (rawUrl.contains("brightspotcdn", ignoreCase = true) || rawUrl.contains("dims3", ignoreCase = true) || rawUrl.startsWith("https://", ignoreCase = true)) {
-            rawUrl
-        } else {
+        val cleanUrl = if (rawUrl.contains("url=", ignoreCase = true) && rawUrl.contains("http", ignoreCase = true)) {
             rawUrl.extractNestedImageUrl()
+        } else {
+            rawUrl
         }
-        return cleanUrl.replaceFirst("http://", "https://")
+        return if (cleanUrl.startsWith("http://", ignoreCase = true) && !cleanUrl.contains("turner.com", ignoreCase = true) && !cleanUrl.contains("cnn.com", ignoreCase = true)) {
+            cleanUrl.replaceFirst("http://", "https://")
+        } else {
+            cleanUrl
+        }
     }
     return null
 }
