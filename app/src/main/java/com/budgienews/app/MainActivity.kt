@@ -1407,12 +1407,12 @@ private fun SettingsScreen(
 
     if (showChangelogDialog) {
         val changelogItems = listOf(
-            "6 Free USA News Outlets & Push Notifications" to "Wired up live coverage from 6 major free US newsrooms (NPR, CBS News, ABC News, CNN, Fox News, NYT News) across Main and Politics RSS feeds (FeedSources and SourceFilter). Integrated USA background polling (FeedNotificationWorker) and device push notifications (BudgieMessagingService & BudgieAccountApi.registerDevice), syncing regional default choices (defaultUsaSource & defaultGbSource) to cloud push services.",
-            "Separate Regional Background Workers" to "Split background feed polling into distinct regional workers (GbFeedNotificationWorker and UsaFeedNotificationWorker) so GB and USA feeds check independently and fast without scanning all 12 outlets sequentially.",
-            "USA Image Thumbnail & Enclosure Sanitization" to "Filtered out audio/podcast .mp3/.mp4 enclosures on NPR/CBS, rejected 1x1 tracking GIFs, and retained Turner/CNN cleartext HTTP endpoints for reliable thumbnail extraction across all USA feeds.",
-            "Badge Sizing & Full USA Brand Color Palette" to "Upgraded source pills from capped raw text (92.dp max) to uniform surface badges (minHeight = 24.dp) and added custom brand colors across NPR, CBS, ABC, CNN, Fox News, and NYT.",
-            "Dedicated Default Outlets Page (DefaultOutletsScreen)" to "Created a separate, dedicated regional startup settings screen accessible from Shared App Settings → Default news outlets to configure startup newsroom feeds independently for GB and USA.",
-            "Location Tracking & Permission Removal" to "Completely removed ACCESS_COARSE_LOCATION and ACCESS_FINE_LOCATION permissions from AndroidManifest.xml and stripped out internal LocationManager providers.",
+            "New USA News Outlets & Notifications" to "Added live coverage from 6 major US newsrooms (NPR, CBS, ABC, CNN, Fox, NYT) for both Main and Politics categories. You can now receive push notifications for US breaking news.",
+            "Official Outlet Logos & Rich Images" to "Added official high-resolution logos for all news outlets. Improved image loading for USA feeds like CBS and NPR so you always see crisp article thumbnails.",
+            "Custom Brand Colors & Badges" to "Upgraded the news source badges with custom brand colors and a cleaner, more uniform design.",
+            "Dedicated Regional Settings" to "Added a new settings screen to easily configure your default startup news outlets independently for the UK and USA.",
+            "Faster Background Updates" to "Split the background checking process so UK and USA feeds update independently and much faster.",
+            "Improved Privacy" to "Completely removed all location tracking and location permissions. Budgie News respects your privacy."
         )
         AlertDialog(
             onDismissRequest = { showChangelogDialog = false },
@@ -2945,10 +2945,15 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                         !extractedUrl.contains("pixel", ignoreCase = true) && !extractedUrl.contains("tracking", ignoreCase = true) &&
                         !extractedUrl.contains("beacon", ignoreCase = true) && !extractedUrl.endsWith(".gif", ignoreCase = true)) {
                         
-                        val cleanExtracted = if (extractedUrl.startsWith("http://", ignoreCase = true) && !extractedUrl.contains("turner.com", ignoreCase = true) && !extractedUrl.contains("cnn.com", ignoreCase = true)) {
+                        var cleanExtracted = if (extractedUrl.startsWith("http://", ignoreCase = true) && !extractedUrl.contains("turner.com", ignoreCase = true) && !extractedUrl.contains("cnn.com", ignoreCase = true)) {
                             extractedUrl.replaceFirst("http://", "https://")
                         } else {
                             extractedUrl
+                        }
+                        
+                        // CBS provides tiny 60x60 thumbnails by default. Remove the path segment to get the full-res image.
+                        if (cleanExtracted.contains("cbsnewsstatic.com", ignoreCase = true) && cleanExtracted.contains("thumbnail/60x60/", ignoreCase = true)) {
+                            cleanExtracted = cleanExtracted.replace("thumbnail/60x60/", "", ignoreCase = true)
                         }
                         
                         val current = imageUrl
@@ -2964,7 +2969,7 @@ private fun readItem(parser: XmlPullParser, fallbackSource: String, containerTag
                 }
                 if (parser.eventType == XmlPullParser.START_TAG) parser.skipTag()
             }
-            "content:encoded", "content" -> {
+            "content:encoded", "content", "encoded" -> {
                 val encodedContent = parser.readText()
                 val encodedImg = encodedContent.firstImageUrl()
                 if (encodedImg != null && (imageUrl == null || imageUrl.endsWith(".mp3", ignoreCase = true) || imageUrl.endsWith(".mp4", ignoreCase = true) || imageUrl.contains("generic", ignoreCase = true) || imageUrl.contains("logo", ignoreCase = true) || imageUrl.contains("60x60", ignoreCase = true) || encodedImg.contains("large", ignoreCase = true) || encodedImg.contains("high", ignoreCase = true) || encodedImg.contains("brightspotcdn", ignoreCase = true) || encodedImg.contains("cbsnews", ignoreCase = true))) {
